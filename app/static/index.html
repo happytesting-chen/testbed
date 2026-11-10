@@ -1,26 +1,79 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Agent Security Testbed</title><style>
-:root{font-family:system-ui,Segoe UI,sans-serif;color:#1b2638;background:#f4f7fb}body{margin:0}header{background:#132b4a;color:white;padding:20px 5vw}header small{color:#c4d5e9}main{max-width:1120px;margin:25px auto;padding:0 18px}nav{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}button{border:1px solid #ccd5e0;border-radius:8px;padding:10px 14px;background:white;cursor:pointer}button.active,.primary{background:#1765ad;color:white;border-color:#1765ad}.panel{background:white;border:1px solid #dfe6ee;border-radius:12px;padding:22px;box-shadow:0 2px 8px #102d4910}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:12px;border-bottom:1px solid #e8edf3}input,textarea{border:1px solid #b9c6d5;border-radius:7px;padding:10px;font:inherit;max-width:100%}textarea{width:95%;min-height:75px}#conversation{min-height:150px;white-space:pre-wrap;background:#f5f8fc;padding:14px;border-radius:8px;margin-bottom:14px}.muted{color:#61738a}.error{color:#b42318}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f7fb;padding:14px;border-radius:8px}label{display:inline-block;margin:10px 0}.hidden{display:none}</style></head><body>
-<header><h2>AI Agent Security Testbed</h2><small>Workbench-style synthetic assessment assistant · v0</small></header><main>
-<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><nav id="tabs"><button data-tab="reports" class="active">Reports</button><button data-tab="findings">Findings</button><button data-tab="assistant">AI Assistant</button><button data-tab="trace" class="eval">Execution Trace</button><button data-tab="evaluation" class="eval">Evaluation</button></nav><label>Black-box preview <input type="checkbox" id="blackbox" checked></label></div>
-<section class="panel" id="reports"><h3>Reports</h3><p class="muted">Upload synthetic TXT or Markdown reports (max 1 MB).</p><input type="file" id="file" accept=".txt,.md"><button onclick="upload()" class="primary">Upload</button><p id="uploadstatus"></p><div id="reportlist"></div></section>
-<section class="panel hidden" id="findings"><h3>Authoritative Findings</h3><div id="findinglist"></div></section>
-<section class="panel hidden" id="assistant"><h3>AI Assistant</h3><p class="muted">The v0 response engine is deterministic; LLM integration is a later milestone.</p><div id="conversation"></div><textarea id="message" placeholder="Summarise the critical findings in Report A"></textarea><p><button class="primary" onclick="chat()">Send</button></p></section>
-<section class="panel hidden" id="trace"><h3>Execution Trace</h3><button onclick="loadRuns()">Refresh runs</button><div id="runs"></div><pre id="traceview">Select a run to inspect observable events.</pre></section>
-<section class="panel hidden" id="evaluation"><h3>Internal Evaluation</h3><p>O01: Answer manipulation. Reference attacks and automated success oracles are planned for the next milestone.</p><button onclick="showGroundTruth()">View ground truth</button><button onclick="resetAll()">Reset synthetic data</button><pre id="truth"></pre></section>
-<p class="muted">Black-box is a UI preview. Backend evaluator routes always require an evaluator token; do not expose that token to vendors.</p></main><script>
-const token=()=>sessionStorage.getItem('evaluator_token')||prompt('Evaluator token (stored in this browser tab only):')||'';
-async function api(path,opts={}){let r=await fetch(path,opts);let j=await r.json();if(!r.ok)throw Error(j.detail||r.statusText);return j}
-async function evalApi(path,opts={}){let t=token();sessionStorage.setItem('evaluator_token',t);return api(path,{...opts,headers:{...(opts.headers||{}),'X-Evaluator-Token':t}})}
-function table(rows,fields){return '<table><thead><tr>'+fields.map(f=>'<th>'+f+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+fields.map(f=>'<td>'+esc(r[f]??'')+'</td>').join('')+'</tr>').join('')+'</tbody></table>'}
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-async function loadReports(){document.querySelector('#reportlist').innerHTML=table(await api('/api/reports'),['filename','owner','status','id'])}
-async function loadFindings(){document.querySelector('#findinglist').innerHTML=table(await api('/api/findings'),['id','title','severity','status'])}
-async function upload(){let f=document.querySelector('#file').files[0];if(!f)return;let form=new FormData();form.append('file',f);try{let r=await api('/api/reports/upload',{method:'POST',body:form});document.querySelector('#uploadstatus').textContent='Indexed '+r.filename;await loadReports()}catch(e){document.querySelector('#uploadstatus').textContent=e.message}}
-async function chat(){let m=document.querySelector('#message').value;if(!m.trim())return;try{let r=await api('/api/agent/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:m})});document.querySelector('#conversation').textContent+='You: '+m+'\nAssistant: '+r.response+'\nRun: '+r.run_id+'\n\n';document.querySelector('#message').value=''}catch(e){alert(e.message)}}
-async function loadRuns(){try{let rs=await evalApi('/api/evaluator/runs');let div=document.querySelector('#runs');div.replaceChildren();for(let r of rs){let b=document.createElement('button');b.textContent=r.run_id.slice(0,8)+' · '+r.prompt.slice(0,65);b.onclick=()=>showTrace(r.id);div.append(b)}}catch(e){alert(e.message)}}
-async function showTrace(id){try{document.querySelector('#traceview').textContent=JSON.stringify(await evalApi('/api/evaluator/traces/'+id),null,2)}catch(e){alert(e.message)}}
-async function showGroundTruth(){try{document.querySelector('#truth').textContent=JSON.stringify(await evalApi('/api/evaluator/ground-truth'),null,2)}catch(e){alert(e.message)}}
-async function resetAll(){if(!confirm('Reset all synthetic test data?'))return;try{await evalApi('/api/evaluator/reset',{method:'POST'});await loadReports();await loadFindings();alert('Reset complete')}catch(e){alert(e.message)}}
-let active='reports';function show(t){active=t;document.querySelectorAll('section.panel').forEach(e=>e.classList.toggle('hidden',e.id!==t));document.querySelectorAll('#tabs button').forEach(e=>e.classList.toggle('active',e.dataset.tab===t));if(t==='reports')loadReports();if(t==='findings')loadFindings();if(t==='trace')loadRuns()}
-document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>show(b.dataset.tab));document.querySelector('#blackbox').onchange=e=>{let bb=e.target.checked;document.querySelectorAll('.eval').forEach(b=>b.style.display=bb?'none':'');if(bb&&['trace','evaluation'].includes(active))show('reports')};document.querySelector('#blackbox').dispatchEvent(new Event('change'));loadReports();
-</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workbench</title>
+<style>
+:root{--ink:#1c2733;--muted:#5b6b7a;--line:#d5dde5;--bg:#f3f6f8;--panel:#fff;--accent:#24577a;
+--crit:#b3261e;--high:#c25e00;--med:#8a6d00;--ok:#2e7d4f;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--ink:#e3e9ef;--muted:#9aaab8;--line:#33424f;--bg:#141b22;
+--panel:#1b242d;--accent:#7fb3d6;--crit:#ff8a80;--high:#ffb366;--med:#e6c84f;--ok:#7dd3a0;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}
+header{display:flex;align-items:center;gap:1.5rem;padding:.75rem 1.25rem;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:1rem;margin:0;font-weight:650}
+nav{display:flex;gap:.25rem}nav button{border:0;background:none;color:var(--muted);padding:.4rem .75rem;border-radius:6px;font:inherit;cursor:pointer}
+nav button[aria-selected=true]{background:var(--bg);color:var(--ink);font-weight:600}
+#who{margin-left:auto;color:var(--muted);font-size:.875rem}
+main{max-width:980px;margin:1.25rem auto;padding:0 1.25rem}
+section{display:none}section.on{display:block}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem;margin-bottom:1rem}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.5rem;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:.85rem}
+.sev-Critical{color:var(--crit);font-weight:650}.sev-High{color:var(--high);font-weight:600}.sev-Medium{color:var(--med)}
+.st-Resolved,.st-Closed{color:var(--ok)}
+button.act,input[type=submit]{background:var(--accent);color:var(--panel);border:0;border-radius:6px;padding:.45rem .9rem;font:inherit;cursor:pointer}
+input[type=password],input[type=text],textarea{width:100%;padding:.5rem;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit}
+pre{white-space:pre-wrap;background:var(--bg);padding:.75rem;border-radius:6px;max-height:420px;overflow:auto}
+#log{display:flex;flex-direction:column;gap:.6rem;max-height:55vh;overflow:auto;margin-bottom:.75rem}
+.msg{padding:.6rem .8rem;border-radius:8px;max-width:85%;white-space:pre-wrap}.me{align-self:flex-end;background:var(--accent);color:var(--panel)}.bot{background:var(--bg)}
+.err{color:var(--crit)}a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><h1>Workbench</h1>
+<nav role="tablist">
+<button role="tab" data-t="reports" aria-selected="true">Reports</button>
+<button role="tab" data-t="findings" aria-selected="false">Findings</button>
+<button role="tab" data-t="assistant" aria-selected="false">AI Assistant</button>
+</nav><span id="who">Not signed in</span></header>
+<main>
+<div class="panel" id="signin"><label for="tok">Access token</label>
+<div style="display:flex;gap:.5rem;margin-top:.35rem"><input id="tok" type="password" autocomplete="off"><button class="act" id="go">Sign in</button></div>
+<p id="sierr" class="err"></p></div>
+
+<section id="reports" class="on">
+<div class="panel"><form id="up"><label for="file">Upload a report (.txt or .md, up to 1 MB)</label>
+<div style="display:flex;gap:.5rem;margin-top:.35rem"><input id="file" type="file" accept=".txt,.md"><input type="submit" value="Upload report"></div></form>
+<p id="upmsg"></p></div>
+<div class="panel"><table><thead><tr><th>Report</th><th>Uploaded by</th><th>Status</th><th>Uploaded</th></tr></thead><tbody id="rep"></tbody></table></div>
+<div class="panel" id="viewer" hidden><h2 id="vt" style="font-size:1rem;margin-top:0"></h2><pre id="vc"></pre></div>
+</section>
+
+<section id="findings"><div class="panel"><table><thead><tr><th>ID</th><th>Finding</th><th>Severity</th><th>Status</th></tr></thead><tbody id="fin"></tbody></table><p id="finerr" class="err"></p></div></section>
+
+<section id="assistant"><div class="panel"><div id="log"></div>
+<form id="chat" style="display:flex;gap:.5rem"><input id="q" type="text" placeholder="Ask about reports or findings" aria-label="Message"><input type="submit" value="Send"></form>
+<p style="color:var(--muted);font-size:.85rem;margin-bottom:0"><button class="act" id="newchat" type="button" style="background:none;color:var(--accent);padding:0">Start a new conversation</button></p></div></section>
+</main>
+<script>
+let token="",session=null;const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(path,opt={}){opt.headers={...(opt.headers||{}),Authorization:"Bearer "+token};const r=await fetch(path,opt);
+ const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||("HTTP "+r.status));return b}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.setAttribute("aria-selected",x===b));
+ document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.t));if(b.dataset.t==="findings")loadFindings()});
+$("go").onclick=async()=>{token=$("tok").value.trim();try{const me=await api("/api/me");$("who").textContent=me.user+" ("+me.role+")";$("signin").hidden=true;loadReports()}catch(e){$("sierr").textContent="Sign-in failed: "+e.message}};
+async function loadReports(){const rows=await api("/api/reports");$("rep").innerHTML=rows.map(r=>`<tr><td><a href="#" data-id="${esc(r.id)}">${esc(r.filename)}</a></td><td>${esc(r.owner)}</td><td>${esc(r.status)}</td><td>${esc(r.created_at.slice(0,16).replace("T"," "))}</td></tr>`).join("")||"<tr><td colspan=4>No reports yet. Upload one above.</td></tr>";
+ $("rep").querySelectorAll("a").forEach(a=>a.onclick=async e=>{e.preventDefault();const r=await api("/api/reports/"+a.dataset.id);$("vt").textContent=r.filename;$("vc").textContent=r.content;$("viewer").hidden=false})}
+async function loadFindings(){try{const rows=await api("/api/findings");$("finerr").textContent="";$("fin").innerHTML=rows.map(f=>`<tr><td>${esc(f.id)}</td><td>${esc(f.title)}<br><small style="color:var(--muted)">${esc(f.description)}</small></td><td class="sev-${esc(f.severity)}">${esc(f.severity)}</td><td class="st-${esc(f.status)}">${esc(f.status)}</td></tr>`).join("")}catch(e){$("fin").innerHTML="";$("finerr").textContent=e.message}}
+$("up").onsubmit=async e=>{e.preventDefault();const f=$("file").files[0];if(!f)return;const fd=new FormData();fd.append("file",f);
+ try{const r=await api("/api/reports/upload",{method:"POST",body:fd});$("upmsg").textContent="Uploaded "+r.filename;loadReports()}catch(err){$("upmsg").textContent=err.message}};
+function add(cls,text){const d=document.createElement("div");d.className="msg "+cls;d.textContent=text;$("log").append(d);$("log").scrollTop=1e9;return d}
+$("chat").onsubmit=async e=>{e.preventDefault();const q=$("q").value.trim();if(!q)return;$("q").value="";add("me",q);const p=add("bot","Working…");
+ try{const r=await api("/api/agent/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:q,session_id:session})});session=r.session_id;p.textContent=r.response}catch(err){p.textContent=err.message;p.classList.add("err")}};
+$("newchat").onclick=()=>{session=null;$("log").innerHTML=""};
+</script>
+</body>
+</html>

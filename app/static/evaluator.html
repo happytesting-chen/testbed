@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Testbed evaluator (internal)</title>
+<style>
+:root{--ink:#1c2733;--muted:#5b6b7a;--line:#d5dde5;--bg:#eef1ec;--panel:#fff;--accent:#3d5a2e;--bad:#b3261e;--good:#2e7d4f;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--ink:#e3e9ef;--muted:#9aaab8;--line:#34402f;--bg:#151a14;--panel:#1d241b;--accent:#a8cf8e;--bad:#ff8a80;--good:#7dd3a0;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--bg)}
+header{display:flex;gap:1.5rem;align-items:center;padding:.75rem 1.25rem;background:var(--panel);border-bottom:3px solid var(--accent)}
+header h1{font-size:1rem;margin:0}nav button{border:0;background:none;color:var(--muted);padding:.4rem .75rem;border-radius:6px;font:inherit;cursor:pointer}
+nav button[aria-selected=true]{background:var(--bg);color:var(--ink);font-weight:600}
+main{max-width:1100px;margin:1.25rem auto;padding:0 1.25rem}section{display:none}section.on{display:block}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem;margin-bottom:1rem}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.45rem;border-bottom:1px solid var(--line);vertical-align:top;font-size:.9rem}
+th{color:var(--muted)}pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.6rem;border-radius:6px;max-height:340px;overflow:auto;font-size:.8rem;margin:.3rem 0}
+button.act{background:var(--accent);color:var(--panel);border:0;border-radius:6px;padding:.45rem .9rem;font:inherit;cursor:pointer}
+input,select{padding:.45rem;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit}
+.ev{border-left:3px solid var(--line);padding-left:.75rem;margin:.6rem 0}.ev h3{font-size:.9rem;margin:0}
+.ev.tool_result{border-color:var(--accent)}.ev.final_answer{border-color:var(--good)}.ev.error{border-color:var(--bad)}
+.yes{color:var(--bad);font-weight:650}.no{color:var(--good)}a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><h1>Evaluator</h1><nav>
+<button data-t="runs" aria-selected="true">Execution trace</button>
+<button data-t="validate" aria-selected="false">Validation</button>
+<button data-t="gt" aria-selected="false">Ground truth</button>
+</nav></header>
+<main>
+<div class="panel" id="signin"><label for="tok">Evaluator token</label>
+<div style="display:flex;gap:.5rem;margin-top:.35rem"><input id="tok" type="password" style="flex:1"><button class="act" id="go">Unlock</button></div><p id="err" style="color:var(--bad)"></p></div>
+
+<section id="runs" class="on"><div class="panel"><button class="act" id="refresh">Refresh runs</button>
+<table><thead><tr><th>Time</th><th>Actor</th><th>Prompt</th><th>Tag</th><th>Model</th></tr></thead><tbody id="runlist"></tbody></table></div>
+<div class="panel" id="trace" hidden></div>
+<p style="color:var(--muted);font-size:.85rem">The trace shows observable model requests, responses and tool executions. It does not show the model's internal reasoning.</p></section>
+
+<section id="validate">
+<div class="panel"><h2 style="font-size:1rem;margin-top:0">Agent controls</h2><div id="cfg"></div></div>
+<div class="panel"><h2 style="font-size:1rem;margin-top:0">Run a reference scenario</h2>
+<select id="sc"></select> Trials <input id="n" type="number" value="3" min="1" max="20" style="width:5rem">
+<button class="act" id="runsc">Run scenario</button><p id="scmsg"></p><pre id="scout" hidden></pre></div>
+<div class="panel"><button class="act" id="reset" style="background:var(--bad)">Reset testbed to clean state</button></div></section>
+
+<section id="gt"><div class="panel"><pre id="gtout"></pre></div></section>
+</main>
+<script>
+let token="";const $=id=>document.getElementById(id);
+async function api(p,o={}){o.headers={...(o.headers||{}),"X-Evaluator-Token":token};const r=await fetch(p,o);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||r.status);return b}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.setAttribute("aria-selected",x===b));document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.t))});
+$("go").onclick=async()=>{token=$("tok").value.trim();try{await loadRuns();$("signin").hidden=true;loadCfg();loadGT()}catch(e){$("err").textContent="Access denied: "+e.message}};
+const J=o=>JSON.stringify(o,null,2);
+function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e}
+async function loadRuns(){const rows=await api("/api/runs");const tb=$("runlist");tb.innerHTML="";rows.forEach(r=>{const tr=el("tr");
+ [r.created_at.slice(0,19).replace("T"," "),r.actor,r.prompt.slice(0,80),r.external_run_tag||"",r.model].forEach((t,i)=>{const td=el("td");if(i===2){const a=el("a",t);a.href="#";a.onclick=e=>{e.preventDefault();showTrace(r.id)};td.append(a)}else td.textContent=t;tr.append(td)});tb.append(tr)})}
+async function showTrace(id){const t=await api("/api/traces/"+id);const box=$("trace");box.innerHTML="";box.hidden=false;
+ box.append(el("h2","Run "+id),el("p","Agent controls: "+J(t.run.agent_config)));
+ t.events.forEach(e=>{const d=el("div",undefined,"ev "+e.stage);d.append(el("h3",e.seq+". "+e.stage+"  ("+e.ts.slice(11,23)+")"));
+  let p=e.payload;if(e.stage==="llm_request")p={step:p.step,messages:p.body.messages,tools:(p.body.tools||[]).map(x=>x.function.name)};if(e.stage==="llm_response"){p={...p};delete p.raw}
+  d.append(el("pre",J(p)));box.append(d)});box.scrollIntoView()}
+$("refresh").onclick=loadRuns;
+async function loadCfg(){const c=await api("/api/config");const box=$("cfg");box.innerHTML="";Object.entries(c).forEach(([k,v])=>{const l=el("label");const cb=el("input");cb.type="checkbox";cb.checked=v;
+ cb.onchange=async()=>{await api("/api/config",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({[k]:cb.checked})})};l.append(cb," "+k+" (control "+(v?"on":"off")+" at load)");box.append(l,el("br"))})}
+async function loadGT(){const g=await api("/api/ground-truth");$("gtout").textContent=J(g);$("sc").innerHTML="";Object.keys(g.scenarios).forEach(k=>{const o=el("option",k);o.value=k;$("sc").append(o)})}
+$("runsc").onclick=async()=>{$("scmsg").textContent="Running against the live model. This can take a few minutes.";$("scout").hidden=true;
+ try{const r=await api("/api/scenarios/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scenario_id:$("sc").value,trials:+$("n").value})});
+ $("scmsg").textContent="Done.";$("scout").textContent=J(r);$("scout").hidden=false;loadRuns()}catch(e){$("scmsg").textContent="Failed: "+e.message}};
+$("reset").onclick=async()=>{if(!confirm("Delete all uploads, runs and traces and restore seed data?"))return;await api("/api/reset",{method:"POST"});loadRuns();loadCfg()};
+</script>
+</body>
+</html>
