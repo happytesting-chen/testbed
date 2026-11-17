@@ -1,10 +1,10 @@
-# Two-Role Access Control Implementation Plan (rev 2)
+# Two-Role Access Control Implementation Plan (rev 3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add Analyst and Manager roles to the Document Assistant testbed; Managers can edit finding severity/status; findings are auto-extracted from uploaded reports with structured status reporting; a vendor-facing frontend mode hides internal test panels.
+**Goal:** Add Analyst and Manager roles to the Document Assistant testbed; findings are auto-extracted on upload with structured status reporting; Managers can edit finding severity/status; full audit history and DB persistence; comprehensive tests covering existing and new functionality.
 
-**Architecture:** Extend the existing FastAPI + SQLite stack with a third token (MANAGER_TOKEN), a `finding_id` column and `updated_by` on `findings`, a new `finding_history` table, a new `extraction_log` table, four new public API endpoints, a synchronous LLM extraction module that returns structured status, atomic DB writes for modifications, and a role-aware findings panel. A `?vendor` URL flag hides internal red-team panels without modifying them.
+**Architecture:** Extend the existing FastAPI + SQLite stack with a third token (MANAGER_TOKEN), a `finding_id` column and `updated_by` on `findings`, a new `finding_history` table, a new `extraction_log` table, four new public API endpoints, a synchronous LLM extraction module that returns structured status, atomic DB writes for modifications, and a role-aware findings panel. All existing internal red-team panels remain unchanged.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite, Pydantic v2, pytest, vanilla JS. No new packages.
 
@@ -50,7 +50,7 @@
 | `app/db.py` | Modify | Schema migrations; 8 new/updated methods; reset extended |
 | `app/extractor.py` | Create | Single LLM call; returns `{status, findings, error_detail}` |
 | `app/main.py` | Modify | Manager in auth; `FindingUpdate` model; 4 new routes; wire extraction |
-| `app/static/index.html` | Modify | Findings panel; `?vendor` mode hides internal panels |
+| `app/static/index.html` | Modify | Role-aware findings panel; existing internal panels unchanged |
 | `tests/fixtures/vapt_synthetic_v1.md` | Create | Canonical synthetic VAPT report with known finding IDs |
 | `tests/conftest.py` | Modify | Add `MANAGER_TOKEN`, `MANAGER`, `seeded_finding`, `extraction_script`, `SYNTHETIC_FINDINGS` |
 | `tests/test_access.py` | Modify | Update shared-token test to include `MANAGER_TOKEN` |
@@ -735,44 +735,7 @@ git commit -m "feat: structured finding extraction with status reporting and syn
 
 ---
 
-## Task 4: Vendor-Facing Frontend Mode
-
-**Files:** `app/static/index.html`
-
-**Interfaces:** URL parameter `?vendor` hides all elements with `data-internal="true"`. No backend change.
-
-- [ ] **Step 1: Mark internal panels**
-
-Add `data-internal="true"` to the opening `<div class="panel">` tag of each internal test panel:
-- TEST-04 system prompt leakage panel
-- TEST-02 direct attack prompts panel
-- TEST-03 sensitive data leakage panel
-
-- [ ] **Step 2: Add vendor-mode JS at the top of the script block**
-
-```javascript
-if (new URLSearchParams(window.location.search).has("vendor")) {
-    document.querySelectorAll("[data-internal]").forEach(el => { el.hidden = true; });
-}
-```
-
-Place this as the first statement in the `<script>` block, before `let token = ""`.
-
-- [ ] **Step 3: Manual verification**
-
-Normal URL: all panels visible.
-`?vendor` URL: TEST-01 test buttons, TEST-02 attack prompts, TEST-03 panel, TEST-04 canary info all hidden. Upload form, reports table, chat, findings panel all visible.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add app/static/index.html
-git commit -m "feat: vendor-facing mode (?vendor) hides internal red-team panels"
-```
-
----
-
-## Task 5: Frontend Role-Aware Findings Panel
+## Task 4: Frontend Role-Aware Findings Panel
 
 **Files:** `app/static/index.html`
 
@@ -886,7 +849,7 @@ In the upload submit handler, after `loadReports()`, add `loadFindings()`.
 
 As Analyst: sign in → findings panel shows finding IDs (F-001 etc.), plain text cells, History link works.
 As Manager: sign in → dropdowns visible, Save persists changes, History shows audit trail.
-Via `?vendor`: only findings panel visible (test panels hidden).
+Existing internal test panels (TEST-01 through TEST-04) remain fully visible and functional.
 
 - [ ] **Step 7: Commit**
 
@@ -897,7 +860,7 @@ git commit -m "feat: role-aware findings panel showing finding IDs and modificat
 
 ---
 
-## Task 6: README and .env.example
+## Task 5: README and .env.example
 
 **Files:** `.env.example`, `README.md`
 
@@ -913,7 +876,6 @@ Add or update:
 - **Finding extraction** — auto-runs on upload; response includes `extraction.status` (`completed`/`failed`/`not_configured`); original report content unchanged
 - **API** — `GET /api/findings`, `GET /api/findings/{id}`, `PATCH /api/findings/{id}` with example curl, `GET /api/findings/{id}/history`
 - **Frontend** — sign in with token; role displayed; manager sees edit controls; analyst sees read-only; `finding_id` from report shown in table
-- **Vendor mode** — append `?vendor` to URL to hide internal test panels before giving vendors access
 - **Active AI tools** — `list_reports`, `search_reports`, `read_report`; no write tools
 - **AI finding modification** — not supported; asking AI to change a finding does not modify the database
 - **Running tests** — `pytest tests/test_roles.py -v` runs ROLE-01 through ROLE-14
