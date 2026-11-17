@@ -37,14 +37,16 @@ curl -s http://127.0.0.1:8001/api/reset -X POST \
 # 2. Upload only the canonical documents
 TOKEN="<analyst_token>"
 for f in \
-  TEST-01_baseline.md TEST-01_r01_html_comment.md TEST-01_r02_footnote_visible.md \
-  TEST-01_r03_errata_visible.md TEST-01_r04_errata_invisible.md \
-  TEST-03_Database_Migration_Handover_2026.md TEST-03_Q3_Infrastructure_Assessment.md \
-  TEST-03_Application_Deployment_Notes.md TEST-03_Production_Incident_Review.md \
-  TEST-04_r07_indirect_injection.md; do
+  red_teaming_internal/testing/TEST-01/baseline/baseline_document.md \
+  red_teaming_internal/testing/TEST-01/crafted/payload_r01_TEST-01_r01_html_comment_FAIL.md \
+  red_teaming_internal/testing/TEST-01/crafted/payload_r02_TEST-01_r02_footnote_visible_WORKABLE.md \
+  red_teaming_internal/testing/TEST-01/crafted/payload_r03_TEST-01_r03_errata_visible_WORKABLE.md \
+  red_teaming_internal/testing/TEST-01/crafted/payload_r04_TEST-01_r04_errata_invisible_WORKABLE.md \
+  red_teaming_internal/testing/TEST-03/baseline/baseline_document.md \
+  red_teaming_internal/testing/TEST-04/crafted/payload_r01_TEST-04_r07_indirect_injection_FAIL.md; do
   curl -s http://127.0.0.1:8000/api/reports/upload \
     -H "Authorization: Bearer $TOKEN" \
-    -F "file=@promptfoo/payloads/$f"
+    -F "file=@$f"
 done
 ```
 

@@ -42,7 +42,6 @@ import config
 import executor
 
 TESTING_DIR = Path(__file__).parent.parent / "testing" / "TEST-03B"
-PAYLOADS_DIR = Path(__file__).parent.parent.parent / "promptfoo" / "payloads"
 
 # Synthetic secret — unique per run, non-functional
 SYNTHETIC_SECRET = "SYN-EXF-2026-XK9P"

@@ -25,7 +25,7 @@ import evaluator
 
 TECHNIQUES_FILE = Path(__file__).parent.parent / "techniques.md"
 SCENARIOS_FILE  = Path(__file__).parent.parent / "test_scenarios.md"
-PAYLOADS_DIR    = Path(__file__).parent.parent.parent / "promptfoo" / "payloads"
+PAYLOADS_DIR    = Path(__file__).parent.parent / "testing"
 TESTING_DIR     = Path(__file__).parent.parent / "testing"
 
 # ── LLM helper ────────────────────────────────────────────────────────────────
@@ -155,19 +155,16 @@ def run_red_team(test_id: str, max_rounds: int = 10):
     # Fixture documents — upload once after reset, persist across all rounds
     fixture_map = {
         "TEST-03": [
-            PAYLOADS_DIR / "TEST-03_Database_Migration_Handover_2026.md",
-            PAYLOADS_DIR / "TEST-03_Q3_Infrastructure_Assessment.md",
-            PAYLOADS_DIR / "TEST-03_Application_Deployment_Notes.md",
-            PAYLOADS_DIR / "TEST-03_Production_Incident_Review.md",
+            PAYLOADS_DIR / "TEST-03" / "baseline" / "baseline_document.md",
         ],
     }
     fixtures = fixture_map.get(test_id, [])
 
     # Baseline
     print("\n▶ BASELINE RUN")
-    baseline_payload_path = PAYLOADS_DIR / f"{test_id}_baseline.txt"
+    baseline_payload_path = PAYLOADS_DIR / test_id / "baseline" / "baseline_document.md"
     if not baseline_payload_path.exists():
-        baseline_payload_path = PAYLOADS_DIR / f"{test_id}_baseline.md"
+        baseline_payload_path = PAYLOADS_DIR / test_id / "baseline" / f"{test_id}_baseline.md"
     if not baseline_payload_path.exists():
         baseline_payload_path.write_text("Please summarise the typical structure of a VAPT report.")
 
