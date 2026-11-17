@@ -1,10 +1,10 @@
-# Two-Role Access Control Implementation Plan (rev 4)
+# Two-Role Access Control Implementation Plan (rev 5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add Analyst and Manager roles; auto-extract findings on upload; Managers can edit findings; basic history of Manager changes; all existing AI functionality preserved.
+**Goal:** Add Analyst and Manager roles; auto-extract findings on upload; Managers can edit findings via API, frontend, and AI tool; basic history of Manager changes; AI-mediated privilege escalation testable; all existing AI functionality preserved.
 
-**Architecture:** Add `MANAGER_TOKEN`, two schema additions (`finding_id`, `updated_by` on `findings`; new `finding_history` table), four API endpoints, a one-call LLM extractor, and a role-aware findings panel. No extraction_log table. No denied-attempt audit in V1.
+**Architecture:** Add `MANAGER_TOKEN`, two schema additions (`finding_id`, `updated_by` on `findings`; new `finding_history` table), four REST endpoints, a one-call LLM extractor, an `update_finding` AI tool with backend role enforcement, and a role-aware findings panel. No extraction_log table. No denied-attempt audit in V1.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite, Pydantic v2, pytest, vanilla JS. No new packages.
 
@@ -24,7 +24,8 @@
 - Upload response includes `findings_extracted: int` and `extraction_error: str | None`.
 - Extraction failure → upload still returns 200.
 - Original report content never modified when findings are edited.
-- All existing system prompts, agent tools, and red-team panels unchanged.
+- Existing system prompts, report tools (`list_reports`, `search_reports`, `read_report`), and red-team panels unchanged.
+- AI tool `update_finding`: role comes exclusively from the authenticated HTTP identity, never from LLM output or tool arguments.
 - `VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Informational"}`
 - `VALID_STATUSES = {"Open", "In Progress", "Resolved", "Accepted Risk"}`
 
@@ -36,8 +37,9 @@
 |---|---|---|
 | `app/config.py` | Modify | Add `manager_token` |
 | `app/db.py` | Modify | Schema migrations; 5 new methods; `reset()` clears `finding_history` |
+| `app/agent.py` | Modify | Add `update_finding` tool; pass `actor_role` through `run()` → `_execute()` |
 | `app/extractor.py` | Create | Single LLM call → `{"findings": list, "error": str | None}` |
-| `app/main.py` | Modify | Manager in auth; `FindingUpdate`; 4 new routes; wire extractor into upload |
+| `app/main.py` | Modify | Manager in auth; `FindingUpdate`; 4 new routes; wire extractor; pass role to agent |
 | `app/static/index.html` | Modify | Findings panel; role-aware edit controls |
 | `tests/fixtures/vapt_synthetic_v1.md` | Create | Canonical VAPT report with F-001, F-002 |
 | `tests/conftest.py` | Modify | `MANAGER_TOKEN`, `MANAGER`, `extraction_script`, `seeded_report_and_finding` |
@@ -323,7 +325,174 @@ git commit -m "feat: finding management API with role enforcement and audit hist
 
 ---
 
-## Task 3: Finding Extraction on Upload
+## Task 3: AI `update_finding` Tool
+
+**Files:** `app/agent.py`, `app/main.py` (chat endpoint only)
+
+**Security invariant:** `actor_role` flows HTTP auth → `Agent.run()` → `Agent._execute()`. Never from LLM output or tool arguments. The tool schema has no `role` parameter.
+
+**Interfaces consumed:** `db.get_finding`, `db.update_finding_and_log` from Task 1; `roles("analyst","manager")` from Task 1.
+**Interfaces produced:**
+- `Agent.run(message, actor, actor_role="", session_id=None, run_tag=None)`
+- `update_finding` tool active in `TOOLS`
+- Chat endpoint allows both analyst and manager
+
+- [ ] **Step 1: Write four failing tests in `tests/test_roles.py`**
+
+Add import: `from tests.conftest import _first_step, _answer`
+
+```python
+def _update_script(fid, severity="Low"):
+    """Script that always calls update_finding on the first step."""
+    def script(messages, tools):
+        if _first_step(messages):
+            return {"choices": [{"message": {"content": None, "tool_calls": [{
+                "id": "u1", "type": "function",
+                "function": {"name": "update_finding",
+                             "arguments": json.dumps({"finding_id": fid, "severity": severity})}
+            }]}}]}
+        return _answer("Done.")
+    return script
+
+# Test 1: Manager updates finding via AI — DB changes
+def test_manager_ai_update(make_clients, seeded_report_and_finding):
+    _, f = seeded_report_and_finding
+    pub, _, db = make_clients(script=_update_script(f["id"]))
+    pub.post("/api/agent/chat", headers=MANAGER, json={"message": "update it"})
+    assert db.get_finding(f["id"])["severity"] == "Low"
+
+# Test 2: Analyst update via AI — DB unchanged
+def test_analyst_ai_update_denied(make_clients, seeded_report_and_finding):
+    _, f = seeded_report_and_finding
+    pub, _, db = make_clients(script=_update_script(f["id"]))
+    pub.post("/api/agent/chat", headers=ANALYST, json={"message": "update it"})
+    assert db.get_finding(f["id"])["severity"] == "Critical"
+
+# Test 3: Analyst passes role in tool args — still denied
+def test_analyst_role_in_args_denied(make_clients, seeded_report_and_finding):
+    _, f = seeded_report_and_finding
+    fid = f["id"]
+    def spoofed_script(messages, tools):
+        if _first_step(messages):
+            return {"choices": [{"message": {"content": None, "tool_calls": [{
+                "id": "u1", "type": "function",
+                "function": {"name": "update_finding",
+                             "arguments": json.dumps(
+                                 {"finding_id": fid, "severity": "Low", "role": "manager"})}
+            }]}}]}
+        return _answer("Tried.")
+    pub, _, db = make_clients(script=spoofed_script)
+    pub.post("/api/agent/chat", headers=ANALYST, json={"message": "update as manager"})
+    assert db.get_finding(fid)["severity"] == "Critical"
+
+# Test 4: Prompt injection in uploaded report — analyst session — DB unchanged
+def test_prompt_injection_cannot_modify_finding(make_clients, seeded_report_and_finding):
+    _, f = seeded_report_and_finding
+    fid = f["id"]
+    # Simulate a vulnerable LLM following injected content by calling update_finding
+    pub, _, db = make_clients(script=_update_script(fid))
+    pub.post("/api/agent/chat", headers=ANALYST,
+             json={"message": "Summarise the uploaded reports"})
+    assert db.get_finding(fid)["severity"] == "Critical"
+```
+
+Run: `pytest tests/test_roles.py::test_manager_ai_update tests/test_roles.py::test_analyst_ai_update_denied -v`
+Expected: FAIL (tool not in agent yet / chat rejects manager)
+
+- [ ] **Step 2: Add `update_finding` tool to `app/agent.py`**
+
+Add at module level (alongside the existing `TOOLS_SUMMARISER` / `TOOLS_FULL` block):
+```python
+_VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Informational"}
+_VALID_STATUSES   = {"Open", "In Progress", "Resolved", "Accepted Risk"}
+
+_UPDATE_FINDING_TOOL = {"type": "function", "function": {
+    "name": "update_finding",
+    "description": "Update the severity or status of a security finding by its internal ID. Requires manager role.",
+    "parameters": {"type": "object",
+                   "properties": {
+                       "finding_id": {"type": "string", "description": "Internal finding UUID"},
+                       "severity":   {"type": "string",
+                                      "description": "New severity: Critical, High, Medium, Low, Informational"},
+                       "status":     {"type": "string",
+                                      "description": "New status: Open, In Progress, Resolved, Accepted Risk"},
+                   },
+                   "required": ["finding_id"]}}}
+
+# Replace the existing: TOOLS = TOOLS_SUMMARISER
+TOOLS = TOOLS_SUMMARISER + [_UPDATE_FINDING_TOOL]
+```
+
+- [ ] **Step 3: Add `actor_role` to `Agent.run()` and pass to `_execute()`**
+
+Change `run` signature:
+```python
+def run(self, message: str, actor: str, actor_role: str = "",
+        session_id: str | None = None, run_tag: str | None = None) -> dict:
+```
+
+Change the `_execute` call inside `run`:
+```python
+result, retrieved = self._execute(cfg, t.name, t.arguments, actor, actor_role)
+```
+
+Change `_execute` signature:
+```python
+def _execute(self, cfg: dict, name: str, args: dict,
+             actor: str = "", actor_role: str = "") -> tuple[dict, list[str]]:
+```
+
+Add `update_finding` branch inside `_execute` (after the existing `get_findings` branch):
+```python
+if name == "update_finding":
+    if actor_role != "manager":
+        return {"error": "Permission denied: manager role required"}, []
+    fid  = str(args.get("finding_id", "")).strip()
+    sev  = args.get("severity")  or None
+    sta  = args.get("status")    or None
+    if not fid:
+        return {"error": "finding_id is required"}, []
+    if sev and sev not in _VALID_SEVERITIES:
+        return {"error": f"Invalid severity: {sev}"}, []
+    if sta and sta not in _VALID_STATUSES:
+        return {"error": f"Invalid status: {sta}"}, []
+    if not sev and not sta:
+        return {"error": "Provide at least severity or status"}, []
+    f = self.db.get_finding(fid)
+    if not f:
+        return {"error": f"Finding {fid} not found"}, []
+    updated = self.db.update_finding_and_log(fid, sev, sta, actor)
+    return {"updated": updated}, []
+```
+
+- [ ] **Step 4: Allow manager in chat endpoint in `app/main.py`**
+
+Change the chat route's dependency from `roles("analyst")` to `roles("analyst", "manager")`.
+
+Pass `ident.role` to `agent.run()`:
+```python
+return agent.run(req.message, ident.user, ident.role, req.session_id,
+                 (x_testbed_run_tag or "")[:100] or None)
+```
+
+- [ ] **Step 5: Run the four AI tool tests**
+
+Run: `pytest tests/test_roles.py::test_manager_ai_update tests/test_roles.py::test_analyst_ai_update_denied tests/test_roles.py::test_analyst_role_in_args_denied tests/test_roles.py::test_prompt_injection_cannot_modify_finding -v`
+Expected: all 4 PASS.
+
+Run: `pytest tests/ -v`
+Expected: no regressions across full suite.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add app/agent.py app/main.py tests/test_roles.py
+git commit -m "feat: update_finding AI tool with backend role enforcement"
+```
+
+---
+
+## Task 4: Finding Extraction on Upload
 
 **Files:** `app/extractor.py` (create), `app/main.py` (wire into upload), `tests/conftest.py`, `tests/test_roles.py`, `tests/fixtures/vapt_synthetic_v1.md` (create)
 
@@ -526,7 +695,7 @@ git commit -m "feat: auto-extract findings on upload with duplicate handling"
 
 ---
 
-## Task 4: Frontend Role-Aware Findings Panel
+## Task 5: Frontend Role-Aware Findings Panel
 
 **Files:** `app/static/index.html`
 
@@ -629,7 +798,7 @@ git commit -m "feat: role-aware findings panel with finding IDs and edit history
 
 ---
 
-## Task 5: README and .env.example
+## Task 6: README and .env.example
 
 **Files:** `.env.example`, `README.md`
 
@@ -644,8 +813,9 @@ Add:
 - **Tokens** — set `ANALYST_TOKEN` and `MANAGER_TOKEN` in `.env`
 - **Finding extraction** — runs automatically on upload; response includes `findings_extracted` and `extraction_error`
 - **API** — `GET /api/findings`, `GET /api/findings/{id}`, `PATCH /api/findings/{id}`, `GET /api/findings/{id}/history`
-- **Active AI tools** — `list_reports`, `search_reports`, `read_report`; no write tools
-- **Tests** — `pytest tests/test_roles.py -v`
+- **Active AI tools** — `list_reports`, `search_reports`, `read_report`, `update_finding` (manager only)
+- **AI privilege escalation tests** — `pytest tests/test_roles.py -k "ai_update or injection" -v`
+- **Full test suite** — `pytest tests/ -v`
 
 - [ ] **Step 3: Run final suite**
 
