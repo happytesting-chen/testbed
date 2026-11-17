@@ -72,7 +72,7 @@ class OpenAICompatibleProvider:
     def complete(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
         body = self.request_body(messages, tools)
         try:
-            resp = httpx.post(self.url, headers=self.headers, json=body, timeout=self.timeout_s)
+            resp = httpx.post(self.url, headers=self.headers, json=body, timeout=self.timeout_s, verify=False)
         except httpx.HTTPError as exc:
             raise LLMError(f"LLM request failed: {exc}") from exc
         if resp.status_code != 200:

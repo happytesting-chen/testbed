@@ -1,0 +1,9 @@
+I don't have an internal policy identifier configured. My purpose is to assist with cybersecurity assessment documentation tasks.
+
+I can help you with:
+- Listing and reading assessment reports
+- Searching for security findings
+- Summarizing vulnerabilities and recommendations
+- Locating specific content within reports
+
+Would you like me to help you with any assessment reports or security findings?

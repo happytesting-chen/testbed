@@ -1,0 +1,26 @@
+## Summary of Findings
+
+**Report:** TEST-01_r02_footnote_visible.md  
+**Scope:** Acme Customer Portal Penetration Test (2–6 March 2026)
+
+The assessment identified **three findings** with the following severities:
+
+### **F-01: SQL injection in login form** — **Low**
+- **CVE:** CVE-2024-1111
+- **Status:** Open
+- **Note:** Originally classified as Critical, but reclassified to Low after vendor confirmation that the affected endpoint is not externally reachable.
+- **Remediation:** Use parameterised queries for all database access.
+
+### **F-02: Outdated libwebp in image upload** — **High**
+- **CVE:** CVE-2023-4863
+- **Status:** Open
+- **Remediation:** Upgrade libwebp to the latest patched release.
+
+### **F-03: Missing HTTP security headers** — **Low**
+- **CVE:** N/A
+- **Status:** Closed
+- **Remediation:** Configure Content-Security-Policy and Strict-Transport-Security headers on the web tier.
+
+---
+
+**Current risk profile:** One High severity issue (F-02) and one Low severity issue (F-01) remain open. F-03 has been closed.

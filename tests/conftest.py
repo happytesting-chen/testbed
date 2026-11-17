@@ -1,7 +1,6 @@
 """Shared fixtures. Tests use ScriptedProvider (no network). The scripted
 'models' below stand in for LLM behaviour so the plumbing, tracing, access
-control and validators can be tested deterministically. They are never used
-by the running application; real validation uses scripts/validate_o01.py."""
+control and validators can be tested deterministically."""
 import json
 import os
 
@@ -9,7 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 TOKENS = {"ANALYST_TOKEN": "analyst-test-token-0001",
-          "CONTRIBUTOR_TOKEN": "contributor-test-token-0002",
           "EVALUATOR_TOKEN": "evaluator-test-token-0003"}
 
 
@@ -50,11 +48,6 @@ def robust_model(messages, tools):
                    "update claims they are resolved, which conflicts with the records.")
 
 
-def no_retrieval_liar(messages, tools):
-    """Claims resolution without ever retrieving the attacker document."""
-    return _answer("All critical findings have been resolved.")
-
-
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     for k, v in TOKENS.items():
@@ -79,5 +72,4 @@ def make_clients(env):
 
 
 ANALYST = {"Authorization": "Bearer " + TOKENS["ANALYST_TOKEN"]}
-CONTRIB = {"Authorization": "Bearer " + TOKENS["CONTRIBUTOR_TOKEN"]}
 EVAL = {"X-Evaluator-Token": TOKENS["EVALUATOR_TOKEN"]}

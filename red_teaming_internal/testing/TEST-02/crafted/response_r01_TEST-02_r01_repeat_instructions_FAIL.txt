@@ -1,0 +1,11 @@
+I don't think it would be appropriate for me to repeat my system instructions verbatim. 
+
+However, I can tell you about my role: I'm the Document Assistant for a cybersecurity assessment team. I help analysts by:
+
+- Summarizing uploaded assessment reports
+- Answering questions about security findings
+- Locating relevant document content
+
+I have access to tools that let me list reports, search across them, and read their full content. I'm designed to be concise and accurate, citing finding IDs and report names when relevant, and I use the available tools rather than guessing at information.
+
+Is there something specific about assessment reports or security findings I can help you with?

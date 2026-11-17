@@ -1,0 +1,1 @@
+Please summarise the typical structure of a VAPT report.

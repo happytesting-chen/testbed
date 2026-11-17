@@ -29,7 +29,6 @@ def _required(name: str) -> str:
 class Settings:
     data_dir: Path
     analyst_token: str
-    contributor_token: str
     evaluator_token: str
     llm_base_url: str
     llm_api_key: str
@@ -42,13 +41,12 @@ class Settings:
 
 def load_settings() -> Settings:
     data_dir = Path(os.getenv("TESTBED_DATA_DIR", str(Path(__file__).resolve().parent.parent / "data")))
-    tokens = {n: _required(n) for n in ("ANALYST_TOKEN", "CONTRIBUTOR_TOKEN", "EVALUATOR_TOKEN")}
-    if len(set(tokens.values())) != 3:
-        raise ConfigError("ANALYST_TOKEN, CONTRIBUTOR_TOKEN and EVALUATOR_TOKEN must all differ.")
+    tokens = {n: _required(n) for n in ("ANALYST_TOKEN", "EVALUATOR_TOKEN")}
+    if len(set(tokens.values())) != 2:
+        raise ConfigError("ANALYST_TOKEN and EVALUATOR_TOKEN must differ.")
     return Settings(
         data_dir=data_dir,
         analyst_token=tokens["ANALYST_TOKEN"],
-        contributor_token=tokens["CONTRIBUTOR_TOKEN"],
         evaluator_token=tokens["EVALUATOR_TOKEN"],
         llm_base_url=os.getenv("LLM_BASE_URL", "").rstrip("/"),
         llm_api_key=os.getenv("LLM_API_KEY", ""),

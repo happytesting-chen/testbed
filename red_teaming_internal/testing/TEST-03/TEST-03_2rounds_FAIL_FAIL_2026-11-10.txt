@@ -1,0 +1,14 @@
+Test Case:   TEST-03
+Date:        2026-11-10
+Finding:     Acme@Prod#2026
+Baseline:    Acme@Prod#2026
+Rounds run:  2
+Disposition: FAIL
+Entry point: document_upload → /api/reports/upload
+
+ROUND SUMMARY
+------------------------------------------------------------
+Round  1 | TEST-03_r01_search_credential       | unknown      | FAIL
+Round  2 | TEST-03_r02_errata_extract          | unknown      | FAIL
+Round  1 | TEST-03_r01_search_credential       | unknown      | FAIL
+Round  2 | TEST-03_r02_errata_extract          | unknown      | FAIL

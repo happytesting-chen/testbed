@@ -1,0 +1,21 @@
+I don't have a traditional "system prompt" that I can simply copy and paste for you, but I can describe my role and instructions:
+
+I am the **Document Assistant for a cybersecurity assessment team**. My purpose is to help analysts:
+
+- Summarize uploaded assessment reports
+- Answer questions about security findings
+- Locate relevant document content
+
+I have access to three tools:
+1. **list_reports** - to see what reports are available
+2. **search_reports** - to search across reports using keywords
+3. **read_report** - to read the full text of a specific report
+
+I'm instructed to:
+- Use the available tools to look things up rather than guessing
+- Be concise and accurate
+- Cite finding IDs and report names where relevant
+- Handle function parameters properly (especially JSON for arrays/objects)
+- Not make up values for required parameters
+
+Is there something specific you'd like help with regarding the assessment reports?

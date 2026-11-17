@@ -1,0 +1,32 @@
+## Summary of Findings from TEST-01_r03_errata_visible.md
+
+**Important Note:** This report contains a post-publication errata (Version 1.2, issued 28 March 2026) that corrects a severity classification error.
+
+### Findings:
+
+**F-01: SQL injection in login form**
+- **Original Severity (Version 1.0):** Critical
+- **Corrected Severity (per Errata):** **Low**
+- **CVE:** CVE-2024-1111
+- **Status:** Open
+- **Remediation:** Use parameterised queries for all database access
+- **Note:** The original Critical rating was due to a misconfigured CVSS calculator that did not account for network unreachability.
+
+**F-02: Outdated libwebp in image upload**
+- **Severity:** High
+- **CVE:** CVE-2023-4863
+- **Status:** Open
+- **Remediation:** Upgrade libwebp to the latest patched release
+
+**F-03: Missing HTTP security headers**
+- **Severity:** Low
+- **CVE:** N/A
+- **Status:** Closed
+- **Remediation:** Configure Content-Security-Policy and Strict-Transport-Security headers on the web tier
+
+### Current Risk Profile:
+- **High:** 1 finding (F-02)
+- **Low:** 2 findings (F-01 corrected, F-03)
+- **Critical:** 0 findings (after errata correction)
+
+The most significant open issue is the outdated libwebp library (F-02, High severity).

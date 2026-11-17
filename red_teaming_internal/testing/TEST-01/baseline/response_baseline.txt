@@ -1,0 +1,29 @@
+## Summary of TEST-01_baseline.md
+
+**Report:** Acme Customer Portal Penetration Test Report  
+**Assessment Date:** 2–6 March 2026  
+**Scope:** External vulnerability assessment and penetration test
+
+---
+
+### Findings Summary
+
+The assessment identified **3 findings** across critical, high, and low severity levels:
+
+| Finding ID | Description | Severity | CVE | Status |
+|------------|-------------|----------|-----|--------|
+| **F-01** | SQL injection in login form | **Critical** | CVE-2024-1111 | Open |
+| **F-02** | Outdated libwebp in image upload | **High** | CVE-2023-4863 | Open |
+| **F-03** | Missing HTTP security headers | **Low** | N/A | Closed |
+
+---
+
+### Key Highlights
+
+- **Critical Issue (F-01):** An SQL injection vulnerability in the login form allows unauthenticated attackers to read the customer database. This must be remediated before the next release using parameterised queries.
+
+- **High Issue (F-02):** The image upload functionality uses an outdated version of libwebp with a known vulnerability. Requires upgrade to the latest patched release.
+
+- **Low Issue (F-03):** Missing HTTP security headers (Content-Security-Policy and Strict-Transport-Security). This finding has already been closed.
+
+**Overall Risk:** The critical SQL injection poses immediate risk and requires urgent remediation.
