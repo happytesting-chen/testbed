@@ -1,10 +1,10 @@
-# Two-Role Access Control Implementation Plan (rev 3)
+# Two-Role Access Control Implementation Plan (rev 4)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add Analyst and Manager roles to the Document Assistant testbed; findings are auto-extracted on upload with structured status reporting; Managers can edit finding severity/status; full audit history and DB persistence; comprehensive tests covering existing and new functionality.
+**Goal:** Add Analyst and Manager roles; auto-extract findings on upload; Managers can edit findings; basic history of Manager changes; all existing AI functionality preserved.
 
-**Architecture:** Extend the existing FastAPI + SQLite stack with a third token (MANAGER_TOKEN), a `finding_id` column and `updated_by` on `findings`, a new `finding_history` table, a new `extraction_log` table, four new public API endpoints, a synchronous LLM extraction module that returns structured status, atomic DB writes for modifications, and a role-aware findings panel. All existing internal red-team panels remain unchanged.
+**Architecture:** Add `MANAGER_TOKEN`, two schema additions (`finding_id`, `updated_by` on `findings`; new `finding_history` table), four API endpoints, a one-call LLM extractor, and a role-aware findings panel. No extraction_log table. No denied-attempt audit in V1.
 
 **Tech Stack:** Python 3.12, FastAPI, SQLite, Pydantic v2, pytest, vanilla JS. No new packages.
 
@@ -15,30 +15,18 @@
 ## Global Constraints
 
 - No new Python packages.
-- All tokens from env vars; never embed credentials in source or frontend JS.
-- `ANALYST_TOKEN`, `MANAGER_TOKEN`, `EVALUATOR_TOKEN` must all differ; `ConfigError` if any two are equal.
-- Unauthenticated → 401. Authenticated wrong-role → 403.
-- Allowed modifications: update finding + insert history in one SQLite transaction.
-- Denied modifications: insert history only (no finding change); no transaction needed.
-- Audit log records both allowed AND denied attempts with actual previous and resulting/attempted values.
-- Extraction failure must be logged in `extraction_log`; upload still returns 200.
-- Do not modify existing system prompts, test-scenario payloads, evaluator endpoints, or agent tools.
-- `PATCH` body: `extra="forbid"`, at least one field required, enum-validated → 422 on violation.
+- Tokens from env vars only; no credentials in source or frontend JS.
+- All three tokens must differ; `ConfigError` on collision.
+- Unauthenticated → 401. Wrong-role PATCH → 403.
+- History records successful Manager changes only (no denied attempts in V1).
+- Manager update + history insert in one SQLite transaction.
+- Duplicate findings from same report: skip on matching `(report_id, finding_id)`.
+- Upload response includes `findings_extracted: int` and `extraction_error: str | None`.
+- Extraction failure → upload still returns 200.
+- Original report content never modified when findings are edited.
+- All existing system prompts, agent tools, and red-team panels unchanged.
 - `VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Informational"}`
 - `VALID_STATUSES = {"Open", "In Progress", "Resolved", "Accepted Risk"}`
-- `db.reset()` clears `finding_history` and `extraction_log` alongside other tables.
-- Original uploaded report content is never modified when findings are edited.
-- Extraction and conversational injection are independent attack surfaces; extraction must not alter TEST-01 ground truth.
-
----
-
-## Review Focus
-
-1. **Partial PATCH history values** — `PATCH` with only `severity` should record `old_status` and `new_status` as the same value (unchanged), not null. Added to Task 2 step 1.
-2. **Role spoofing via body fields** — `PATCH` with analyst token and `{"severity":"Low","role":"manager"}` should be 403 (auth) not 422 (Pydantic). `extra="forbid"` raises 422 for unknown fields, so ROLE-10 must use a valid body with an analyst token only. Added to Task 2 step 1.
-3. **Duplicate `finding_id` per upload** — if the LLM extracts two findings with the same `finding_id`, both should be stored (they may legitimately appear in different sections); duplicates across different report uploads are fine. Test that `finding_id` is preserved per row. Added to Task 3 step 2.
-4. **Extraction with no findings** — a valid report with no finding table should produce `status=completed`, `findings_extracted=0`. Added to Task 3 step 2.
-5. **History visibility after DB reopen** — changes persisted in one connection must be readable via a new connection (SQLite WAL/commit). Added to Task 2 step 1.
 
 ---
 
@@ -47,16 +35,16 @@
 | File | Action | Responsibility |
 |---|---|---|
 | `app/config.py` | Modify | Add `manager_token` |
-| `app/db.py` | Modify | Schema migrations; 8 new/updated methods; reset extended |
-| `app/extractor.py` | Create | Single LLM call; returns `{status, findings, error_detail}` |
-| `app/main.py` | Modify | Manager in auth; `FindingUpdate` model; 4 new routes; wire extraction |
-| `app/static/index.html` | Modify | Role-aware findings panel; existing internal panels unchanged |
-| `tests/fixtures/vapt_synthetic_v1.md` | Create | Canonical synthetic VAPT report with known finding IDs |
-| `tests/conftest.py` | Modify | Add `MANAGER_TOKEN`, `MANAGER`, `seeded_finding`, `extraction_script`, `SYNTHETIC_FINDINGS` |
+| `app/db.py` | Modify | Schema migrations; 5 new methods; `reset()` clears `finding_history` |
+| `app/extractor.py` | Create | Single LLM call → `{"findings": list, "error": str | None}` |
+| `app/main.py` | Modify | Manager in auth; `FindingUpdate`; 4 new routes; wire extractor into upload |
+| `app/static/index.html` | Modify | Findings panel; role-aware edit controls |
+| `tests/fixtures/vapt_synthetic_v1.md` | Create | Canonical VAPT report with F-001, F-002 |
+| `tests/conftest.py` | Modify | `MANAGER_TOKEN`, `MANAGER`, `extraction_script`, `seeded_report_and_finding` |
 | `tests/test_access.py` | Modify | Update shared-token test to include `MANAGER_TOKEN` |
-| `tests/test_roles.py` | Create | ROLE-01 through ROLE-14 and review-focus tests |
+| `tests/test_roles.py` | Create | Focused role and extraction tests |
 | `.env.example` | Modify | Add `MANAGER_TOKEN` |
-| `README.md` | Modify | Roles, tokens, API, vendor mode, tests |
+| `README.md` | Modify | Roles, tokens, API, tests |
 
 ---
 
@@ -67,18 +55,14 @@
 **Interfaces produced:**
 - `Settings.manager_token: str`
 - `Identity(user="manager1", role="manager")` via bearer token
-- `db.get_finding(finding_id: str) -> dict | None`
-- `db.add_finding(finding_id: str | None, report_id: str | None, title: str, severity: str, status: str, description: str) -> dict`
-- `db.bulk_add_findings(report_id: str, findings: list[dict]) -> int` — each dict may include `finding_id`
-- `db.update_finding_atomic(finding_id: str, severity: str | None, status: str | None, actor: str, role: str) -> dict` — update + history in one transaction
-- `db.record_denied_update(finding_id: str, actor: str, role: str, attempted_severity: str | None, attempted_status: str | None) -> None`
-- `db.get_finding_history(finding_id: str) -> list[dict]` — `allowed` field as Python `bool`
-- `db.log_extraction(report_id: str, status: str, count: int, error_detail: str | None) -> None`
-- `db.reset()` clears `finding_history`, `extraction_log`
+- `db.get_finding(id: str) -> dict | None`
+- `db.add_finding(report_id, finding_id, title, severity, status, description) -> dict`
+- `db.bulk_add_findings(report_id: str, findings: list[dict]) -> int` — skips invalid enums and duplicate `(report_id, finding_id)`
+- `db.update_finding_and_log(id, severity, status, actor) -> dict` — atomic update + history
+- `db.get_finding_history(id: str) -> list[dict]`
 
-- [ ] **Step 1: Add `MANAGER_TOKEN` to conftest and add `MANAGER` headers**
+- [ ] **Step 1: Add `MANAGER_TOKEN` to conftest**
 
-In `tests/conftest.py`:
 ```python
 TOKENS = {
     "ANALYST_TOKEN":   "analyst-test-token-0001",
@@ -88,21 +72,17 @@ TOKENS = {
 MANAGER = {"Authorization": "Bearer " + TOKENS["MANAGER_TOKEN"]}
 ```
 
-- [ ] **Step 2: Update existing shared-token test**
+- [ ] **Step 2: Fix `test_config_rejects_shared_tokens` in `tests/test_access.py`**
 
-In `tests/test_access.py`, update `test_config_rejects_shared_tokens` to also set `MANAGER_TOKEN` with a unique value so the test reaches the uniqueness check rather than failing on `_required`:
+Add `MANAGER_TOKEN` so it doesn't fail on `_required` before the uniqueness check:
 ```python
-def test_config_rejects_shared_tokens(monkeypatch):
-    monkeypatch.setenv("ANALYST_TOKEN",   "same-token-collision-xx")
-    monkeypatch.setenv("MANAGER_TOKEN",   "different-manager-tok-xx")
-    monkeypatch.setenv("EVALUATOR_TOKEN", "same-token-collision-xx")
-    with pytest.raises(ConfigError):
-        load_settings()
+monkeypatch.setenv("ANALYST_TOKEN",   "same-token-collision-xx")
+monkeypatch.setenv("MANAGER_TOKEN",   "different-manager-tok-xx")
+monkeypatch.setenv("EVALUATOR_TOKEN", "same-token-collision-xx")
 ```
 
-- [ ] **Step 3: Write failing manager identity test**
+- [ ] **Step 3: Write failing manager identity test in `tests/test_access.py`**
 
-In `tests/test_access.py`, add:
 ```python
 from tests.conftest import MANAGER
 
@@ -116,12 +96,11 @@ def test_manager_identity(make_clients):
 Run: `pytest tests/test_access.py::test_manager_identity -v`
 Expected: FAIL
 
-- [ ] **Step 4: Add `manager_token` to `app/config.py`**
+- [ ] **Step 4: Implement config and auth changes**
 
-Add `manager_token: str` to `Settings`. Add `"MANAGER_TOKEN"` to the `_required` dict. Extend the uniqueness check to cover all three tokens.
+`app/config.py`: add `manager_token: str` to `Settings`; add `"MANAGER_TOKEN"` to `_required`; extend uniqueness check to cover all three tokens.
 
-- [ ] **Step 5: Add manager to auth in `app/main.py`**
-
+`app/main.py` inside `make_auth`:
 ```python
 users = {
     s.analyst_token: Identity(user="analyst1", role="analyst"),
@@ -129,244 +108,147 @@ users = {
 }
 ```
 
-- [ ] **Step 6: Run identity test**
-
 Run: `pytest tests/test_access.py::test_manager_identity -v`
 Expected: PASS
 
-- [ ] **Step 7: Extend DB schema in `app/db.py`**
+- [ ] **Step 5: Extend DB schema in `app/db.py`**
 
-Add to `SCHEMA`:
+Add `finding_history` to `SCHEMA`:
 ```sql
-CREATE TABLE IF NOT EXISTS extraction_log(
-  id          TEXT PRIMARY KEY,
-  report_id   TEXT NOT NULL,
-  status      TEXT NOT NULL,
-  findings_extracted INTEGER NOT NULL DEFAULT 0,
-  error_detail TEXT,
-  ts          TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS finding_history(
   id           TEXT PRIMARY KEY,
   finding_id   TEXT NOT NULL,
   actor        TEXT NOT NULL,
-  role         TEXT NOT NULL,
-  action       TEXT NOT NULL,
   old_severity TEXT,
   new_severity TEXT,
   old_status   TEXT,
   new_status   TEXT,
-  allowed      INTEGER NOT NULL,
   ts           TEXT NOT NULL
 );
 ```
 
-In `Database.init()`, after `executescript(SCHEMA)`, add migration guards:
+Add migration guard in `Database.init()` after `executescript(SCHEMA)`:
 ```python
 with self.conn() as c:
     cols = {r[1] for r in c.execute("PRAGMA table_info(findings)")}
-    if "updated_by" not in cols:
+    if "updated_by"  not in cols:
         c.execute("ALTER TABLE findings ADD COLUMN updated_by TEXT")
-    if "finding_id" not in cols:
+    if "finding_id"  not in cols:
         c.execute("ALTER TABLE findings ADD COLUMN finding_id TEXT")
 ```
 
-- [ ] **Step 8: Update `db.reset()` to include new tables**
+Update `reset()` — add `"finding_history"` to the tables list (not under `keep_history`; always clear).
 
-```python
-def reset(self, keep_history: bool = False):
-    tables = ["reports", "reports_fts", "findings", "sessions", "settings", "extraction_log"]
-    if not keep_history:
-        tables += ["runs", "events", "validations", "finding_history"]
-    ...
-```
+- [ ] **Step 6: Add five DB methods**
 
-- [ ] **Step 9: Add all new DB methods**
+`get_finding(id)`: `SELECT * FROM findings WHERE id=?`
 
-`get_finding(finding_id)`: `SELECT * FROM findings WHERE id=?`
-
-`add_finding(finding_id, report_id, title, severity, status, description)`:
-INSERT with new UUID as `id`, preserve caller-supplied `finding_id` (may be None).
+`add_finding(report_id, finding_id, title, severity, status, description)`:
+INSERT with new UUID; return dict.
 
 `bulk_add_findings(report_id, findings)`:
-Iterate; skip rows where severity or status not in valid sets; call `add_finding`; return count.
+Single `with self.conn()` block. For each item: skip if severity or status invalid; skip if `finding_id` is set and `(report_id, finding_id)` already exists; INSERT; increment count. Return count.
 
-`update_finding_atomic(finding_id, severity, status, actor, role)`:
-Single `with self.conn()` block: read current row, UPDATE findings, read updated row, INSERT into finding_history with `allowed=1`, return updated dict.
+`update_finding_and_log(finding_id, severity, status, actor)`:
+Single `with self.conn()` block: read current row, UPDATE with `coalesce(?,col)`, read updated row, INSERT into `finding_history`. Return updated dict.
 
-`record_denied_update(finding_id, actor, role, attempted_severity, attempted_status)`:
-Single `with self.conn()` block: read current row for `old_*` values, INSERT into finding_history with `new_*` = attempted values, `allowed=0`.
+`get_finding_history(finding_id)`: `SELECT * FROM finding_history WHERE finding_id=? ORDER BY ts`
 
-`get_finding_history(finding_id)`:
-`SELECT * FROM finding_history WHERE finding_id=? ORDER BY ts`; convert `allowed` INTEGER to `bool`.
-
-`log_extraction(report_id, status, count, error_detail)`:
-INSERT INTO extraction_log.
-
-- [ ] **Step 10: Add `seeded_finding` fixture to conftest**
+- [ ] **Step 7: Add `seeded_report_and_finding` fixture to conftest**
 
 ```python
 @pytest.fixture
-def seeded_finding(env):
+def seeded_report_and_finding(env):
     _, db = env
-    return db.add_finding(
-        finding_id="F-001",
-        report_id=None,
-        title="SQL Injection in login form",
-        severity="Critical",
-        status="Open",
-        description="Unparameterized query allows SQLi.",
+    report = db.add_report("test.md", "analyst1", "analyst", "# Test report\nF-001 Critical Open")
+    finding = db.add_finding(
+        report["id"], "F-001", "SQL Injection in login form",
+        "Critical", "Open", "Unparameterized query allows SQLi.",
     )
+    return report, finding
 ```
 
-- [ ] **Step 11: Run existing suite**
+- [ ] **Step 8: Run existing suite**
 
 Run: `pytest tests/ -v`
-Expected: all prior passing tests still pass; `test_manager_identity` passes.
+Expected: all prior tests pass; `test_manager_identity` passes.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add app/config.py app/db.py app/main.py tests/conftest.py tests/test_access.py
-git commit -m "feat: manager role, finding_id/history/extraction_log schema, atomic DB methods"
+git commit -m "feat: manager role, finding_id/history schema, DB methods"
 ```
 
 ---
 
 ## Task 2: Finding Management API
 
-**Files:** `app/main.py` (add `FindingUpdate`, four routes), `tests/test_roles.py`
+**Files:** `app/main.py` (add `FindingUpdate` + 4 routes), `tests/test_roles.py`
 
-**Interfaces consumed:** all DB methods from Task 1; `roles("analyst","manager")` from auth.
+**Interfaces consumed:** DB methods from Task 1; `roles("analyst","manager")` from auth.
 **Interfaces produced:** `GET /api/findings`, `GET /api/findings/{id}`, `PATCH /api/findings/{id}`, `GET /api/findings/{id}/history`
 
-- [ ] **Step 1: Write all failing role tests in `tests/test_roles.py`**
+- [ ] **Step 1: Write failing tests in `tests/test_roles.py`**
 
 ```python
 import pytest
-from tests.conftest import ANALYST, MANAGER
+from tests.conftest import ANALYST, MANAGER, seeded_report_and_finding
 
-# ROLE-05
-def test_role05_analyst_view_findings(make_clients, seeded_finding):
+def test_view_findings(make_clients, seeded_report_and_finding):
     pub, _, _ = make_clients()
-    r = pub.get("/api/findings", headers=ANALYST)
+    assert pub.get("/api/findings", headers=ANALYST).status_code == 200
+    assert pub.get("/api/findings", headers=MANAGER).status_code == 200
+
+def test_manager_update_severity(make_clients, seeded_report_and_finding):
+    pub, _, _ = make_clients()
+    _, f = seeded_report_and_finding
+    r = pub.patch(f"/api/findings/{f['id']}", headers=MANAGER, json={"severity": "Low"})
     assert r.status_code == 200
-    assert any(f["id"] == seeded_finding["id"] for f in r.json())
+    assert pub.get(f"/api/findings/{f['id']}", headers=ANALYST).json()["severity"] == "Low"
 
-# ROLE-06
-def test_role06_manager_update_severity(make_clients, seeded_finding):
+def test_manager_update_status(make_clients, seeded_report_and_finding):
     pub, _, _ = make_clients()
-    fid = seeded_finding["id"]
-    assert pub.patch(f"/api/findings/{fid}", headers=MANAGER,
-                     json={"severity": "Low"}).status_code == 200
-    assert pub.get(f"/api/findings/{fid}", headers=MANAGER).json()["severity"] == "Low"
+    _, f = seeded_report_and_finding
+    r = pub.patch(f"/api/findings/{f['id']}", headers=MANAGER, json={"status": "Accepted Risk"})
+    assert r.status_code == 200
+    assert pub.get(f"/api/findings/{f['id']}", headers=ANALYST).json()["status"] == "Accepted Risk"
 
-# ROLE-07
-def test_role07_manager_update_status(make_clients, seeded_finding):
+def test_analyst_update_denied(make_clients, seeded_report_and_finding):
     pub, _, _ = make_clients()
-    fid = seeded_finding["id"]
-    assert pub.patch(f"/api/findings/{fid}", headers=MANAGER,
-                     json={"status": "Accepted Risk"}).status_code == 200
-    assert pub.get(f"/api/findings/{fid}", headers=MANAGER).json()["status"] == "Accepted Risk"
-
-# ROLE-08: analyst denied, value unchanged
-def test_role08_analyst_update_denied(make_clients, seeded_finding):
-    pub, _, _ = make_clients()
-    fid, original = seeded_finding["id"], seeded_finding["severity"]
-    assert pub.patch(f"/api/findings/{fid}", headers=ANALYST,
+    _, f = seeded_report_and_finding
+    assert pub.patch(f"/api/findings/{f['id']}", headers=ANALYST,
                      json={"severity": "Low"}).status_code == 403
-    assert pub.get(f"/api/findings/{fid}", headers=ANALYST).json()["severity"] == original
+    assert pub.get(f"/api/findings/{f['id']}", headers=ANALYST).json()["severity"] == "Critical"
 
-# ROLE-09: unauthenticated → 401
-def test_role09_anon_update_denied(make_clients, seeded_finding):
+def test_anon_update_denied(make_clients, seeded_report_and_finding):
     pub, _, _ = make_clients()
-    assert pub.patch(f"/api/findings/{seeded_finding['id']}",
+    assert pub.patch(f"/api/findings/{seeded_report_and_finding[1]['id']}",
                      json={"severity": "Low"}).status_code == 401
 
-# ROLE-10: analyst token + valid body → 403 (auth, not Pydantic)
-def test_role10_analyst_role_claim_denied(make_clients, seeded_finding):
-    pub, _, _ = make_clients()
-    assert pub.patch(f"/api/findings/{seeded_finding['id']}", headers=ANALYST,
-                     json={"severity": "Low"}).status_code == 403
+def test_change_persists_after_db_reopen(env, make_clients, seeded_report_and_finding):
+    pub, _, db = make_clients()
+    _, f = seeded_report_and_finding
+    pub.patch(f"/api/findings/{f['id']}", headers=MANAGER, json={"severity": "Low"})
+    from app.db import Database
+    assert Database(db.data_dir).get_finding(f["id"])["severity"] == "Low"
 
-# ROLE-11: change persists
-def test_role11_severity_persists(make_clients, seeded_finding):
+def test_history_after_manager_change(make_clients, seeded_report_and_finding):
     pub, _, _ = make_clients()
-    fid = seeded_finding["id"]
-    pub.patch(f"/api/findings/{fid}", headers=MANAGER, json={"severity": "Low"})
-    assert pub.get(f"/api/findings/{fid}", headers=MANAGER).json()["severity"] == "Low"
+    _, f = seeded_report_and_finding
+    pub.patch(f"/api/findings/{f['id']}", headers=MANAGER, json={"severity": "Low"})
+    h = pub.get(f"/api/findings/{f['id']}/history", headers=ANALYST).json()
+    assert len(h) == 1
+    assert h[0]["old_severity"] == "Critical"
+    assert h[0]["new_severity"] == "Low"
 
-# ROLE-12: history records allowed and denied with correct allowed field
-def test_role12_history(make_clients, seeded_finding):
+def test_invalid_values_rejected(make_clients, seeded_report_and_finding):
     pub, _, _ = make_clients()
-    fid = seeded_finding["id"]
-    pub.patch(f"/api/findings/{fid}", headers=MANAGER, json={"severity": "Low"})
-    pub.patch(f"/api/findings/{fid}", headers=ANALYST,  json={"severity": "High"})
-    history = pub.get(f"/api/findings/{fid}/history", headers=ANALYST).json()
-    assert len(history) == 2
-    assert history[0]["allowed"] is True
-    assert history[1]["allowed"] is False
-
-# ROLE-13: AI chat does not modify DB
-def test_role13_ai_no_db_change(make_clients, seeded_finding):
-    pub, _, _ = make_clients()
-    fid, original = seeded_finding["id"], seeded_finding["severity"]
-    pub.post("/api/agent/chat", headers=ANALYST,
-             json={"message": f"Change finding {fid} severity to Low"})
-    assert pub.get(f"/api/findings/{fid}", headers=ANALYST).json()["severity"] == original
-
-# ROLE-14: invalid enum values → 422
-def test_role14_invalid_values(make_clients, seeded_finding):
-    pub, _, _ = make_clients()
-    fid = seeded_finding["id"]
+    fid = seeded_report_and_finding[1]["id"]
     assert pub.patch(f"/api/findings/{fid}", headers=MANAGER,
                      json={"severity": "BOGUS"}).status_code == 422
     assert pub.patch(f"/api/findings/{fid}", headers=MANAGER,
-                     json={"status": "NotAStatus"}).status_code == 422
-
-# Review Focus: empty body → 422
-def test_rf_empty_patch_rejected(make_clients, seeded_finding):
-    pub, _, _ = make_clients()
-    assert pub.patch(f"/api/findings/{seeded_finding['id']}",
-                     headers=MANAGER, json={}).status_code == 422
-
-# Review Focus: history on fresh finding → []
-def test_rf_history_empty_before_modifications(make_clients, seeded_finding):
-    pub, _, _ = make_clients()
-    r = pub.get(f"/api/findings/{seeded_finding['id']}/history", headers=ANALYST)
-    assert r.status_code == 200
-    assert r.json() == []
-
-# Review Focus: partial PATCH records correct old/new for unchanged field
-def test_rf_partial_patch_history_values(make_clients, seeded_finding):
-    pub, _, db = make_clients()
-    fid = seeded_finding["id"]
-    pub.patch(f"/api/findings/{fid}", headers=MANAGER, json={"severity": "Low"})
-    h = pub.get(f"/api/findings/{fid}/history", headers=ANALYST).json()[0]
-    assert h["old_severity"] == "Critical"
-    assert h["new_severity"] == "Low"
-    assert h["old_status"] == "Open"
-    assert h["new_status"] == "Open"   # unchanged, not null
-
-# Review Focus: denied update records attempted value
-def test_rf_denied_records_attempted_value(make_clients, seeded_finding):
-    pub, _, _ = make_clients()
-    fid = seeded_finding["id"]
-    pub.patch(f"/api/findings/{fid}", headers=ANALYST, json={"severity": "Low"})
-    h = pub.get(f"/api/findings/{fid}/history", headers=ANALYST).json()[0]
-    assert h["allowed"] is False
-    assert h["new_severity"] == "Low"    # attempted value recorded
-
-# Review Focus: change persists after DB reopen
-def test_rf_change_persists_after_db_reopen(env, make_clients, seeded_finding):
-    pub, _, db = make_clients()
-    fid = seeded_finding["id"]
-    pub.patch(f"/api/findings/{fid}", headers=MANAGER, json={"severity": "Low"})
-    # Reopen DB via a new Database instance on the same file
-    from app.db import Database
-    db2 = Database(db.data_dir)
-    assert db2.get_finding(fid)["severity"] == "Low"
+                     json={}).status_code == 422
 ```
 
 Run: `pytest tests/test_roles.py -v`
@@ -374,7 +256,7 @@ Expected: all FAIL.
 
 - [ ] **Step 2: Add `FindingUpdate` and four routes to `app/main.py`**
 
-Add at module level:
+At module level:
 ```python
 from pydantic import ConfigDict, model_validator
 
@@ -387,55 +269,47 @@ class FindingUpdate(BaseModel):
     status:   str | None = None
 
     @model_validator(mode="after")
-    def validate_fields(self):
+    def check(self):
         if self.severity is None and self.status is None:
-            raise ValueError("At least one of severity or status must be provided")
-        if self.severity is not None and self.severity not in VALID_SEVERITIES:
-            raise ValueError(f"severity must be one of {sorted(VALID_SEVERITIES)}")
-        if self.status is not None and self.status not in VALID_STATUSES:
-            raise ValueError(f"status must be one of {sorted(VALID_STATUSES)}")
+            raise ValueError("Provide at least one of severity or status")
+        if self.severity and self.severity not in VALID_SEVERITIES:
+            raise ValueError(f"Invalid severity: {self.severity}")
+        if self.status and self.status not in VALID_STATUSES:
+            raise ValueError(f"Invalid status: {self.status}")
         return self
 ```
 
-Add inside `create_public_app`:
+Inside `create_public_app`:
 ```python
 @app.get("/api/findings")
 def findings_list(ident: Identity = Depends(roles("analyst", "manager"))):
     return db.list_findings()
 
-@app.get("/api/findings/{finding_id}")
-def get_finding(finding_id: str, ident: Identity = Depends(roles("analyst", "manager"))):
-    f = db.get_finding(finding_id)
-    if not f:
-        raise HTTPException(404, "Finding not found")
+@app.get("/api/findings/{fid}")
+def get_finding(fid: str, ident: Identity = Depends(roles("analyst", "manager"))):
+    f = db.get_finding(fid)
+    if not f: raise HTTPException(404, "Not found")
     return f
 
-@app.patch("/api/findings/{finding_id}")
-def update_finding(finding_id: str, updates: FindingUpdate,
+@app.patch("/api/findings/{fid}")
+def update_finding(fid: str, body: FindingUpdate,
                    ident: Identity = Depends(roles("analyst", "manager"))):
-    f = db.get_finding(finding_id)
-    if not f:
-        raise HTTPException(404, "Finding not found")
-    if ident.role == "manager":
-        return db.update_finding_atomic(
-            finding_id, updates.severity, updates.status, ident.user, ident.role)
-    db.record_denied_update(
-        finding_id, ident.user, ident.role, updates.severity, updates.status)
-    raise HTTPException(403, "Only managers can modify findings")
+    if ident.role != "manager":
+        raise HTTPException(403, "Only managers can modify findings")
+    f = db.get_finding(fid)
+    if not f: raise HTTPException(404, "Not found")
+    return db.update_finding_and_log(fid, body.severity, body.status, ident.user)
 
-@app.get("/api/findings/{finding_id}/history")
-def finding_history(finding_id: str, ident: Identity = Depends(roles("analyst", "manager"))):
-    if not db.get_finding(finding_id):
-        raise HTTPException(404, "Finding not found")
-    return db.get_finding_history(finding_id)
+@app.get("/api/findings/{fid}/history")
+def finding_history(fid: str, ident: Identity = Depends(roles("analyst", "manager"))):
+    if not db.get_finding(fid): raise HTTPException(404, "Not found")
+    return db.get_finding_history(fid)
 ```
 
-Note: both roles pass `Depends(roles("analyst","manager"))` so unauthenticated → 401, role check in handler → 403.
-
-- [ ] **Step 3: Run role tests**
+- [ ] **Step 3: Run tests**
 
 Run: `pytest tests/test_roles.py -v`
-Expected: ROLE-05 through ROLE-14 and all review-focus tests PASS. ROLE-01 through ROLE-04 still FAIL.
+Expected: all 8 tests PASS.
 
 Run: `pytest tests/ -v`
 Expected: no regressions.
@@ -444,7 +318,7 @@ Expected: no regressions.
 
 ```bash
 git add app/main.py tests/test_roles.py
-git commit -m "feat: finding management API with atomic writes, role enforcement, audit history"
+git commit -m "feat: finding management API with role enforcement and audit history"
 ```
 
 ---
@@ -453,57 +327,33 @@ git commit -m "feat: finding management API with atomic writes, role enforcement
 
 **Files:** `app/extractor.py` (create), `app/main.py` (wire into upload), `tests/conftest.py`, `tests/test_roles.py`, `tests/fixtures/vapt_synthetic_v1.md` (create)
 
-**Interfaces consumed:** `provider.complete(messages, []) -> LLMResponse`; `db.bulk_add_findings`; `db.log_extraction`
-**Interfaces produced:**
-- `extract_findings(provider, report_id: str, content: str) -> dict` where dict is `{"status": str, "findings": list[dict], "error_detail": str | None}`; each finding dict has keys `finding_id`, `title`, `severity`, `status`, `description`
-- Upload response gains `"extraction": {"status": str, "findings_extracted": int, "error_detail": str | None}`
+**Interfaces produced:** `extract_findings(provider, content: str) -> {"findings": list[dict], "error": str | None}`. Each finding dict: `finding_id`, `title`, `severity`, `status`, `description`. Upload response: `{..., "findings_extracted": int, "extraction_error": str | None}`.
 
-- [ ] **Step 1: Create synthetic VAPT fixture**
+- [ ] **Step 1: Create `tests/fixtures/vapt_synthetic_v1.md`**
 
-Create `tests/fixtures/vapt_synthetic_v1.md`:
 ```markdown
 # Synthetic VAPT Assessment Report — Baseline v1.0
 
-**Target:** Testbed Application (synthetic)
-**Classification:** Internal use only — testbed fixture
-
-## Executive Summary
-
-Three findings were identified during the assessment.
-
 ## Findings
 
-| ID    | Title                            | Severity | Status      |
-|-------|----------------------------------|----------|-------------|
-| F-001 | SQL Injection in login endpoint  | Critical | Open        |
-| F-002 | Reflected XSS in search field    | High     | Open        |
-| F-003 | Outdated TLS 1.0 configuration   | Medium   | In Progress |
-
-## Finding Details
+| ID    | Title                           | Severity | Status |
+|-------|---------------------------------|----------|--------|
+| F-001 | SQL Injection in login endpoint | Critical | Open   |
+| F-002 | Reflected XSS in search field   | High     | Open   |
 
 ### F-001 — SQL Injection in login endpoint
-
 **Severity:** Critical  **Status:** Open
-
-The login endpoint constructs SQL queries using string formatting without parameterisation, allowing an attacker to bypass authentication or extract data.
+Login endpoint constructs SQL using string formatting without parameterisation.
 
 ### F-002 — Reflected XSS in search field
-
 **Severity:** High  **Status:** Open
-
-User-supplied input in the search field is reflected in the response without HTML encoding, enabling script injection.
-
-### F-003 — Outdated TLS 1.0 configuration
-
-**Severity:** Medium  **Status:** In Progress
-
-The server accepts TLS 1.0 connections. Remediation is in progress; a maintenance window has been scheduled.
+User input reflected in response without HTML encoding.
 ```
 
 - [ ] **Step 2: Add extraction fixtures to `tests/conftest.py`**
 
 ```python
-import pathlib
+import pathlib, json
 
 SYNTHETIC_VAPT = (
     pathlib.Path(__file__).parent / "fixtures" / "vapt_synthetic_v1.md"
@@ -511,139 +361,98 @@ SYNTHETIC_VAPT = (
 
 SYNTHETIC_FINDINGS = [
     {"finding_id": "F-001", "title": "SQL Injection in login endpoint",
-     "severity": "Critical", "status": "Open",
-     "description": "Unparameterized SQL query in login endpoint."},
+     "severity": "Critical", "status": "Open", "description": "Unparameterized query."},
     {"finding_id": "F-002", "title": "Reflected XSS in search field",
-     "severity": "High", "status": "Open",
-     "description": "User input reflected without HTML encoding."},
-    {"finding_id": "F-003", "title": "Outdated TLS 1.0 configuration",
-     "severity": "Medium", "status": "In Progress",
-     "description": "Server accepts TLS 1.0 connections."},
+     "severity": "High", "status": "Open", "description": "Unencoded input."},
 ]
 
 def extraction_script(messages, tools):
-    user_content = " ".join(
-        m.get("content") or "" for m in messages if m.get("role") == "user"
-    )
-    if "extract" in user_content.lower():
+    user = " ".join(m.get("content") or "" for m in messages if m.get("role") == "user")
+    if "extract" in user.lower():
         return _answer(json.dumps(SYNTHETIC_FINDINGS))
     return susceptible_model(messages, tools)
 ```
 
-- [ ] **Step 3: Add ROLE-01 through ROLE-04 and extraction tests to `tests/test_roles.py`**
+- [ ] **Step 3: Add extraction tests to `tests/test_roles.py`**
 
 Add import: `from tests.conftest import extraction_script, SYNTHETIC_FINDINGS, SYNTHETIC_VAPT`
 
 ```python
-# ROLE-01
-def test_role01_analyst_upload(make_clients):
+def test_analyst_upload(make_clients):
     pub, _, _ = make_clients(script=extraction_script)
     r = pub.post("/api/reports/upload", headers=ANALYST,
                  files={"file": ("vapt.md", SYNTHETIC_VAPT.encode(), "text/plain")})
     assert r.status_code == 200
 
-# ROLE-02
-def test_role02_manager_upload(make_clients):
+def test_manager_upload(make_clients):
     pub, _, _ = make_clients(script=extraction_script)
     r = pub.post("/api/reports/upload", headers=MANAGER,
                  files={"file": ("vapt.md", SYNTHETIC_VAPT.encode(), "text/plain")})
     assert r.status_code == 200
 
-# ROLE-03: scripted provider is configured → must return 200
-def test_role03_analyst_chat(make_clients):
+def test_analyst_chat(make_clients):
     pub, _, _ = make_clients(script=extraction_script)
-    r = pub.post("/api/agent/chat", headers=ANALYST, json={"message": "summarise"})
-    assert r.status_code == 200
+    assert pub.post("/api/agent/chat", headers=ANALYST,
+                    json={"message": "summarise"}).status_code == 200
 
-# ROLE-04
-def test_role04_manager_chat(make_clients):
+def test_manager_chat(make_clients):
     pub, _, _ = make_clients(script=extraction_script)
-    r = pub.post("/api/agent/chat", headers=MANAGER, json={"message": "summarise"})
-    assert r.status_code == 200
+    assert pub.post("/api/agent/chat", headers=MANAGER,
+                    json={"message": "summarise"}).status_code == 200
 
-# Extraction: synthetic fixture produces correct finding IDs, severities, associations
-def test_extraction_produces_correct_findings(make_clients):
-    pub, _, db = make_clients(script=extraction_script)
+def test_extraction_values_and_report_association(make_clients):
+    pub, _, _ = make_clients(script=extraction_script)
     r = pub.post("/api/reports/upload", headers=ANALYST,
                  files={"file": ("vapt.md", SYNTHETIC_VAPT.encode(), "text/plain")})
     report_id = r.json()["id"]
-    ext = r.json()["extraction"]
-    assert ext["status"] == "completed"
-    assert ext["findings_extracted"] == 3
-    assert ext["error_detail"] is None
-    findings = pub.get("/api/findings", headers=ANALYST).json()
-    by_fid = {f["finding_id"]: f for f in findings}
-    assert by_fid["F-001"]["severity"] == "Critical"
-    assert by_fid["F-002"]["severity"] == "High"
-    assert by_fid["F-003"]["status"] == "In Progress"
-    assert all(f["report_id"] == report_id for f in findings)
+    assert r.json()["findings_extracted"] == 2
+    assert r.json()["extraction_error"] is None
+    findings = {f["finding_id"]: f for f in pub.get("/api/findings", headers=ANALYST).json()}
+    assert findings["F-001"]["severity"] == "Critical"
+    assert findings["F-001"]["report_id"] == report_id
+    assert findings["F-002"]["severity"] == "High"
+    assert findings["F-002"]["report_id"] == report_id
 
-# Extraction: failure → upload still 200, status=failed, findings_extracted=0
-def test_extraction_failure_still_uploads(make_clients):
-    pub, _, _ = make_clients(script=lambda m, t: _answer("not valid json"))
+def test_extraction_failure_upload_still_succeeds(make_clients):
+    pub, _, _ = make_clients(script=lambda m, t: _answer("not json"))
     r = pub.post("/api/reports/upload", headers=ANALYST,
-                 files={"file": ("report.txt", b"some content", "text/plain")})
+                 files={"file": ("r.txt", b"content", "text/plain")})
     assert r.status_code == 200
-    ext = r.json()["extraction"]
-    assert ext["status"] == "failed"
-    assert ext["findings_extracted"] == 0
-    assert ext["error_detail"] is not None
+    assert r.json()["findings_extracted"] == 0
+    assert r.json()["extraction_error"] is not None
 
-# Extraction: empty report → completed with 0 findings
-def test_extraction_empty_report(make_clients):
-    def empty_script(messages, tools):
-        user_content = " ".join(
-            m.get("content") or "" for m in messages if m.get("role") == "user"
-        )
-        if "extract" in user_content.lower():
-            return _answer("[]")
-        return susceptible_model(messages, tools)
-    pub, _, _ = make_clients(script=empty_script)
-    r = pub.post("/api/reports/upload", headers=ANALYST,
-                 files={"file": ("empty.txt", b"No findings.", "text/plain")})
-    assert r.status_code == 200
-    ext = r.json()["extraction"]
-    assert ext["status"] == "completed"
-    assert ext["findings_extracted"] == 0
-
-# Extraction: no provider → not_configured
-def test_extraction_not_configured(make_clients):
-    pub, _, _ = make_clients(with_provider=False)
-    r = pub.post("/api/reports/upload", headers=ANALYST,
-                 files={"file": ("report.txt", b"Finding F-001 Critical", "text/plain")})
-    assert r.status_code == 200
-    assert r.json()["extraction"]["status"] == "not_configured"
-
-# Extraction: two uploads produce separate report associations
-def test_extraction_no_cross_report_contamination(make_clients):
+def test_duplicate_finding_id_same_report_skipped(make_clients):
     pub, _, _ = make_clients(script=extraction_script)
-    r1 = pub.post("/api/reports/upload", headers=ANALYST,
-                  files={"file": ("r1.md", SYNTHETIC_VAPT.encode(), "text/plain")})
-    r2 = pub.post("/api/reports/upload", headers=ANALYST,
-                  files={"file": ("r2.md", SYNTHETIC_VAPT.encode(), "text/plain")})
-    id1, id2 = r1.json()["id"], r2.json()["id"]
-    findings = pub.get("/api/findings", headers=ANALYST).json()
-    r1_findings = [f for f in findings if f["report_id"] == id1]
-    r2_findings = [f for f in findings if f["report_id"] == id2]
-    assert len(r1_findings) == 3
-    assert len(r2_findings) == 3
+    # Upload same report twice — second upload's findings should be skipped (same report_id+finding_id impossible
+    # since each upload gets a new report_id; test within one upload: script returns two items with same finding_id)
+    def dup_script(messages, tools):
+        user = " ".join(m.get("content") or "" for m in messages if m.get("role") == "user")
+        if "extract" in user.lower():
+            return _answer(json.dumps([
+                {"finding_id": "F-001", "title": "First",  "severity": "Critical", "status": "Open", "description": ""},
+                {"finding_id": "F-001", "title": "Second", "severity": "High",     "status": "Open", "description": ""},
+            ]))
+        return susceptible_model(messages, tools)
+    pub2, _, _ = make_clients(script=dup_script)
+    r = pub2.post("/api/reports/upload", headers=ANALYST,
+                  files={"file": ("r.md", b"content", "text/plain")})
+    assert r.json()["findings_extracted"] == 1  # second F-001 skipped
 
-# Benchmark: TEST-01 original report content is unmodified by extraction
-def test_extraction_does_not_modify_report_content(make_clients):
+def test_report_content_unchanged_after_extraction(make_clients):
     pub, _, _ = make_clients(script=extraction_script)
     r = pub.post("/api/reports/upload", headers=ANALYST,
                  files={"file": ("vapt.md", SYNTHETIC_VAPT.encode(), "text/plain")})
-    report = pub.get(f"/api/reports/{r.json()['id']}", headers=ANALYST).json()
-    assert report["content"] == SYNTHETIC_VAPT
+    content = pub.get(f"/api/reports/{r.json()['id']}", headers=ANALYST).json()["content"]
+    assert content == SYNTHETIC_VAPT
 ```
 
-Run: `pytest tests/test_roles.py::test_role01_analyst_upload -v`
-Expected: FAIL.
+Run: `pytest tests/test_roles.py -v`
+Expected: upload/chat/extraction tests FAIL (extractor not implemented yet).
 
 - [ ] **Step 4: Create `app/extractor.py`**
 
 ```python
-"""LLM-based finding extraction from VAPT report text."""
+"""LLM-based finding extraction. Never raises — returns error string on failure."""
 import json
 
 VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Informational"}
@@ -651,26 +460,18 @@ VALID_STATUSES   = {"Open", "In Progress", "Resolved", "Accepted Risk"}
 
 _PROMPT = (
     "Extract all security findings from the VAPT report below.\n"
-    "Return a JSON array only, no other text. Each element must have these keys:\n"
-    '{"finding_id": string or null, "title": string, '
+    "Return a JSON array only, no other text. Each element:\n"
+    '{"finding_id": "F-001 or null", "title": "...", '
     '"severity": "Critical|High|Medium|Low|Informational", '
-    '"status": "Open|In Progress|Resolved|Accepted Risk", "description": string}\n'
-    "finding_id is the ID as it appears in the report (e.g. F-001), or null if not present.\n"
-    "If no findings are present, return [].\nReport:\n"
+    '"status": "Open|In Progress|Resolved|Accepted Risk", "description": "..."}\n'
+    "Return [] if no findings are present.\nReport:\n"
 )
 
-
-def extract_findings(provider, report_id: str, content: str) -> dict:
-    """
-    Returns {"status": "completed"|"failed"|"not_configured",
-             "findings": list[dict], "error_detail": str | None}
-    Never raises.
-    """
+def extract_findings(provider, content: str) -> dict:
     if provider is None:
-        return {"status": "not_configured", "findings": [], "error_detail": None}
+        return {"findings": [], "error": None}
     try:
-        messages = [{"role": "user", "content": _PROMPT + content[:6000]}]
-        resp = provider.complete(messages, [])
+        resp = provider.complete([{"role": "user", "content": _PROMPT + content[:6000]}], [])
         raw = (resp.content or "").strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -678,50 +479,39 @@ def extract_findings(provider, report_id: str, content: str) -> dict:
                 raw = raw[4:]
         parsed = json.loads(raw)
         if not isinstance(parsed, list):
-            return {"status": "failed", "findings": [],
-                    "error_detail": "Response was not a JSON array"}
-        valid = []
-        for item in parsed:
-            if not isinstance(item, dict):
-                continue
-            if item.get("severity") not in VALID_SEVERITIES:
-                continue
-            if item.get("status") not in VALID_STATUSES:
-                continue
-            valid.append({
-                "finding_id":  item.get("finding_id") or None,
-                "title":       str(item.get("title", ""))[:500],
-                "severity":    item["severity"],
-                "status":      item["status"],
-                "description": str(item.get("description", ""))[:2000],
-            })
-        return {"status": "completed", "findings": valid, "error_detail": None}
+            return {"findings": [], "error": "Response was not a JSON array"}
+        valid = [
+            {"finding_id":  item.get("finding_id") or None,
+             "title":       str(item.get("title", ""))[:500],
+             "severity":    item["severity"],
+             "status":      item["status"],
+             "description": str(item.get("description", ""))[:2000]}
+            for item in parsed
+            if isinstance(item, dict)
+            and item.get("severity") in VALID_SEVERITIES
+            and item.get("status")   in VALID_STATUSES
+        ]
+        return {"findings": valid, "error": None}
     except Exception as exc:
-        return {"status": "failed", "findings": [], "error_detail": str(exc)[:500]}
+        return {"findings": [], "error": str(exc)[:200]}
 ```
 
 - [ ] **Step 5: Wire extraction into upload in `app/main.py`**
 
-Add `from . import extractor` at the top of the file.
+Add `from . import extractor` at the top.
 
 In the `upload` route, replace the final `return db.add_report(...)` line:
 ```python
 result = db.add_report(name[:200], ident.user, ident.role, content)
-ext = extractor.extract_findings(agent.provider if agent else None,
-                                 result["id"], content)
+ext = extractor.extract_findings(agent.provider if agent else None, content)
 count = db.bulk_add_findings(result["id"], ext["findings"])
-db.log_extraction(result["id"], ext["status"], count, ext["error_detail"])
-return {**result, "extraction": {
-    "status": ext["status"],
-    "findings_extracted": count,
-    "error_detail": ext["error_detail"],
-}}
+return {**result, "findings_extracted": count, "extraction_error": ext["error"]}
 ```
 
-- [ ] **Step 6: Run all role tests**
+- [ ] **Step 6: Run all tests**
 
 Run: `pytest tests/test_roles.py -v`
-Expected: all tests pass.
+Expected: all tests PASS.
 
 Run: `pytest tests/ -v`
 Expected: no regressions.
@@ -729,8 +519,9 @@ Expected: no regressions.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/extractor.py app/main.py tests/conftest.py tests/test_roles.py tests/fixtures/vapt_synthetic_v1.md
-git commit -m "feat: structured finding extraction with status reporting and synthetic VAPT fixture"
+git add app/extractor.py app/main.py tests/conftest.py tests/test_roles.py \
+        tests/fixtures/vapt_synthetic_v1.md
+git commit -m "feat: auto-extract findings on upload with duplicate handling"
 ```
 
 ---
@@ -739,123 +530,101 @@ git commit -m "feat: structured finding extraction with status reporting and syn
 
 **Files:** `app/static/index.html`
 
-**Interfaces consumed:** `GET /api/findings`, `GET /api/findings/{id}`, `PATCH /api/findings/{id}`, `GET /api/findings/{id}/history`; `role` from `GET /api/me`; `finding_id` field in finding objects.
+**Interfaces consumed:** `GET /api/findings`, `GET /api/findings/{id}`, `PATCH /api/findings/{id}`, `GET /api/findings/{id}/history`; `role` from `GET /api/me`.
 
 - [ ] **Step 1: Capture role at sign-in**
 
 Add `let role = ""` alongside `let token = "", session = null`.
-In the sign-in success handler, after `$("who").textContent = ...`, set `role = me.role`.
+Set `role = me.role` in the sign-in success handler after `$("who").textContent = ...`.
 
-- [ ] **Step 2: Add findings panel HTML to left column**
+- [ ] **Step 2: Add findings panel HTML after the reports panel**
 
-After the existing reports panel, add:
 ```html
 <div class="panel" id="findings-panel">
   <div style="font-weight:650;font-size:.85rem;margin-bottom:.4rem">Findings</div>
   <table>
     <thead>
-      <tr>
-        <th>ID</th><th>Title</th><th>Severity</th>
-        <th>Status</th><th>Updated by</th><th></th>
-      </tr>
+      <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Updated by</th><th></th></tr>
     </thead>
     <tbody id="findings-body"></tbody>
   </table>
 </div>
 ```
 
-- [ ] **Step 3: Implement `loadFindings()`**
+- [ ] **Step 3: Implement `loadFindings()`, `saveFinding()`, `showHistory()`**
 
 ```javascript
-const SEV_COLOR = {
-    Critical:"var(--crit)", High:"var(--high)",
-    Medium:"var(--med)", Low:"var(--ok)", Informational:"var(--muted)"
-};
+const SEV_COLOR = {Critical:"var(--crit)",High:"var(--high)",
+                   Medium:"var(--med)",Low:"var(--ok)",Informational:"var(--muted)"};
 
 async function loadFindings() {
-    const rows = await api("/api/findings").catch(() => []);
-    if (!rows.length) {
-        $("findings-body").innerHTML =
-            "<tr><td colspan=6 style='color:var(--muted)'>No findings yet — upload a report.</td></tr>";
-        return;
-    }
-    $("findings-body").innerHTML = rows.map(f => {
-        const sevCell = role === "manager"
-            ? `<select data-fid="${esc(f.id)}" data-field="severity">${
-                ["Critical","High","Medium","Low","Informational"]
-                    .map(s=>`<option${s===f.severity?" selected":""}>${s}</option>`).join("")
-              }</select>`
-            : `<span style="color:${SEV_COLOR[f.severity]||''};font-weight:600">${esc(f.severity)}</span>`;
-        const staCell = role === "manager"
-            ? `<select data-fid="${esc(f.id)}" data-field="status">${
-                ["Open","In Progress","Resolved","Accepted Risk"]
-                    .map(s=>`<option${s===f.status?" selected":""}>${s}</option>`).join("")
-              }</select>`
-            : esc(f.status);
-        const saveBtn = role === "manager"
-            ? `<button class="act" style="font-size:.75rem;padding:.2rem .5rem"
-                 onclick="saveFinding('${esc(f.id)}')">Save</button> ` : "";
-        return `<tr>
-          <td style="font-size:.85rem;font-weight:600">${esc(f.finding_id||"—")}</td>
-          <td style="font-size:.85rem">${esc(f.title)}</td>
-          <td>${sevCell}</td>
-          <td>${staCell}</td>
-          <td style="font-size:.8rem;color:var(--muted)">${esc(f.updated_by||"—")}</td>
-          <td style="white-space:nowrap">${saveBtn}<a href="#"
-              style="font-size:.75rem"
-              onclick="showHistory('${esc(f.id)}');return false">History</a></td>
-        </tr>`;
-    }).join("");
+  const rows = await api("/api/findings").catch(() => []);
+  if (!rows.length) {
+    $("findings-body").innerHTML =
+      "<tr><td colspan=6 style='color:var(--muted)'>No findings yet.</td></tr>";
+    return;
+  }
+  $("findings-body").innerHTML = rows.map(f => {
+    const sevCell = role === "manager"
+      ? `<select data-fid="${esc(f.id)}" data-field="severity">${
+          ["Critical","High","Medium","Low","Informational"]
+            .map(s=>`<option${s===f.severity?" selected":""}>${s}</option>`).join("")}</select>`
+      : `<span style="color:${SEV_COLOR[f.severity]||''};font-weight:600">${esc(f.severity)}</span>`;
+    const staCell = role === "manager"
+      ? `<select data-fid="${esc(f.id)}" data-field="status">${
+          ["Open","In Progress","Resolved","Accepted Risk"]
+            .map(s=>`<option${s===f.status?" selected":""}>${s}</option>`).join("")}</select>`
+      : esc(f.status);
+    const saveBtn = role === "manager"
+      ? `<button class="act" style="font-size:.75rem;padding:.2rem .5rem"
+           onclick="saveFinding('${esc(f.id)}')">Save</button> ` : "";
+    return `<tr>
+      <td style="font-size:.85rem;font-weight:600">${esc(f.finding_id||"—")}</td>
+      <td style="font-size:.85rem">${esc(f.title)}</td>
+      <td>${sevCell}</td><td>${staCell}</td>
+      <td style="font-size:.8rem;color:var(--muted)">${esc(f.updated_by||"—")}</td>
+      <td style="white-space:nowrap">${saveBtn}<a href="#" style="font-size:.75rem"
+          onclick="showHistory('${esc(f.id)}');return false">History</a></td>
+    </tr>`;
+  }).join("");
+}
+
+async function saveFinding(id) {
+  const body = {};
+  document.querySelectorAll(`select[data-fid="${id}"]`)
+    .forEach(s => { body[s.dataset.field] = s.value; });
+  try {
+    await api(`/api/findings/${id}`,
+      {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    loadFindings();
+  } catch(e) { alert("Save failed: " + e.message); }
+}
+
+async function showHistory(id) {
+  const h = await api(`/api/findings/${id}/history`);
+  alert(h.length
+    ? h.map(e=>`${e.ts.slice(0,16)} ${e.actor}: severity ${e.old_severity}→${e.new_severity||"—"}, status ${e.old_status}→${e.new_status||"—"}`).join("\n")
+    : "No modifications yet.");
 }
 ```
 
-Call `loadFindings()` in sign-in handler alongside `loadReports()`.
+Call `loadFindings()` in sign-in handler. Call `loadFindings()` in upload handler after `loadReports()`.
 
-- [ ] **Step 4: Implement `saveFinding(id)` and `showHistory(id)`**
+- [ ] **Step 4: Manual verification**
 
-```javascript
-async function saveFinding(findingId) {
-    const body = {};
-    document.querySelectorAll(`select[data-fid="${findingId}"]`)
-        .forEach(sel => { body[sel.dataset.field] = sel.value; });
-    try {
-        await api(`/api/findings/${findingId}`,
-            {method:"PATCH",
-             headers:{"Content-Type":"application/json"},
-             body:JSON.stringify(body)});
-        loadFindings();
-    } catch(e) { alert("Save failed: " + e.message); }
-}
+Start: `uvicorn app.main:public_app --port 8000`
 
-async function showHistory(findingId) {
-    const history = await api(`/api/findings/${findingId}/history`);
-    const lines = history.length
-        ? history.map(h =>
-            `${h.ts.slice(0,16)} ${h.actor} (${h.role}) `+
-            `${h.allowed ? "✓ applied" : "✗ denied"}: `+
-            `severity ${h.old_severity}→${h.new_severity||"—"}, `+
-            `status ${h.old_status}→${h.new_status||"—"}`
-          )
-        : ["No modifications yet."];
-    alert(lines.join("\n"));
-}
-```
+Analyst: sign in → header shows `analyst1 (analyst)` → upload vapt_synthetic_v1.md → findings panel shows F-001 (Critical) and F-002 (High) → no edit controls → History shows empty.
 
-- [ ] **Step 5: Reload findings after upload**
+Manager: sign in → header shows `manager1 (manager)` → dropdowns visible → change F-001 severity to Low → Save → panel refreshes → History shows the change.
 
-In the upload submit handler, after `loadReports()`, add `loadFindings()`.
+DevTools check: open Network tab, send `PATCH /api/findings/{id}` with analyst token → 403 returned.
 
-- [ ] **Step 6: Manual verification**
-
-As Analyst: sign in → findings panel shows finding IDs (F-001 etc.), plain text cells, History link works.
-As Manager: sign in → dropdowns visible, Save persists changes, History shows audit trail.
-Existing internal test panels (TEST-01 through TEST-04) remain fully visible and functional.
-
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add app/static/index.html
-git commit -m "feat: role-aware findings panel showing finding IDs and modification history"
+git commit -m "feat: role-aware findings panel with finding IDs and edit history"
 ```
 
 ---
@@ -870,24 +639,23 @@ Add `MANAGER_TOKEN=change-me-min-32-random-characters` below `ANALYST_TOKEN`.
 
 - [ ] **Step 2: Update README**
 
-Add or update:
-- **Roles** — permission matrix (spec section 3)
-- **Credentials** — `ANALYST_TOKEN`, `MANAGER_TOKEN`, `EVALUATOR_TOKEN`; never commit secrets
-- **Finding extraction** — auto-runs on upload; response includes `extraction.status` (`completed`/`failed`/`not_configured`); original report content unchanged
-- **API** — `GET /api/findings`, `GET /api/findings/{id}`, `PATCH /api/findings/{id}` with example curl, `GET /api/findings/{id}/history`
-- **Frontend** — sign in with token; role displayed; manager sees edit controls; analyst sees read-only; `finding_id` from report shown in table
+Add:
+- **Roles** — Analyst/Manager permission table
+- **Tokens** — set `ANALYST_TOKEN` and `MANAGER_TOKEN` in `.env`
+- **Finding extraction** — runs automatically on upload; response includes `findings_extracted` and `extraction_error`
+- **API** — `GET /api/findings`, `GET /api/findings/{id}`, `PATCH /api/findings/{id}`, `GET /api/findings/{id}/history`
 - **Active AI tools** — `list_reports`, `search_reports`, `read_report`; no write tools
-- **AI finding modification** — not supported; asking AI to change a finding does not modify the database
-- **Running tests** — `pytest tests/test_roles.py -v` runs ROLE-01 through ROLE-14
+- **Tests** — `pytest tests/test_roles.py -v`
 
-- [ ] **Step 3: Run final full test suite**
+- [ ] **Step 3: Run final suite**
 
 Run: `pytest tests/ -v`
-Expected: all tests pass.
+Expected: all tests pass. Report any failures rather than claiming success.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Commit and push**
 
 ```bash
 git add .env.example README.md
-git commit -m "docs: roles, extraction status, vendor mode, finding IDs"
+git commit -m "docs: roles, extraction, finding API"
+git push origin V1_18_Nov
 ```
