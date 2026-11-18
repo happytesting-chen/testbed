@@ -13,9 +13,9 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import o01
+from . import extractor, o01
 from .agent import Agent
 from .config import Settings, load_settings
 from .db import Database
@@ -25,9 +25,29 @@ STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 1024 * 1024
 
 
+VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Informational"}
+VALID_STATUSES = {"Open", "In Progress", "Resolved", "Accepted Risk"}
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     session_id: str | None = Field(default=None, max_length=100)
+
+
+class FindingUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    severity: str | None = None
+    status: str | None = None
+
+    @model_validator(mode="after")
+    def check(self):
+        if self.severity is None and self.status is None:
+            raise ValueError("Provide at least one of severity or status")
+        if self.severity and self.severity not in VALID_SEVERITIES:
+            raise ValueError(f"Invalid severity: {self.severity}")
+        if self.status and self.status not in VALID_STATUSES:
+            raise ValueError(f"Invalid status: {self.status}")
+        return self
 
 
 
@@ -49,7 +69,10 @@ class Identity(BaseModel):
 
 
 def make_auth(s: Settings):
-    users = {s.analyst_token: Identity(user="analyst1", role="analyst")}
+    users = {
+        s.analyst_token: Identity(user="analyst1", role="analyst"),
+        s.manager_token: Identity(user="manager1", role="manager"),
+    }
 
     def current(authorization: str | None = Header(default=None)) -> Identity:
         token = (authorization or "").removeprefix("Bearer ").strip()
@@ -83,22 +106,22 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
         return {"status": "ok", "agent_ready": agent is not None}
 
     @app.get("/api/me")
-    def me(ident: Identity = Depends(roles("analyst"))):
+    def me(ident: Identity = Depends(roles("analyst", "manager"))):
         return ident
 
     @app.get("/api/reports")
-    def reports(ident: Identity = Depends(roles("analyst"))):
+    def reports(ident: Identity = Depends(roles("analyst", "manager"))):
         return db.list_reports()
 
     @app.get("/api/reports/{report_id}")
-    def report(report_id: str, ident: Identity = Depends(roles("analyst"))):
+    def report(report_id: str, ident: Identity = Depends(roles("analyst", "manager"))):
         r = db.get_report(report_id)
         if not r:
             raise HTTPException(404, "Report not found")
         return {k: r[k] for k in ("id", "filename", "owner", "status", "created_at", "content")}
 
     @app.post("/api/reports/upload")
-    async def upload(file: UploadFile = File(...), ident: Identity = Depends(roles("analyst"))):
+    async def upload(file: UploadFile = File(...), ident: Identity = Depends(roles("analyst", "manager"))):
         name = Path(file.filename or "").name
         if not name.lower().endswith((".txt", ".md")):
             raise HTTPException(400, "Only .txt and .md files are supported")
@@ -109,15 +132,46 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
             content = raw.decode("utf-8")
         except UnicodeDecodeError:
             raise HTTPException(400, "File must be UTF-8 text")
-        return db.add_report(name[:200], ident.user, ident.role, content)
+        result = db.add_report(name[:200], ident.user, ident.role, content)
+        ext = extractor.extract_findings(agent.provider if agent else None, content)
+        count = db.bulk_add_findings(result["id"], ext["findings"])
+        return {**result, "findings_extracted": count, "extraction_error": ext["error"]}
+
+    @app.get("/api/findings")
+    def findings_list(ident: Identity = Depends(roles("analyst", "manager"))):
+        return db.list_findings()
+
+    @app.get("/api/findings/{fid}")
+    def get_finding(fid: str, ident: Identity = Depends(roles("analyst", "manager"))):
+        f = db.get_finding(fid)
+        if not f:
+            raise HTTPException(404, "Not found")
+        return f
+
+    @app.patch("/api/findings/{fid}")
+    def update_finding(fid: str, body: FindingUpdate,
+                       ident: Identity = Depends(roles("analyst", "manager"))):
+        if ident.role != "manager":
+            raise HTTPException(403, "Only managers can modify findings")
+        f = db.get_finding(fid)
+        if not f:
+            raise HTTPException(404, "Not found")
+        return db.update_finding_and_log(fid, body.severity, body.status, ident.user)
+
+    @app.get("/api/findings/{fid}/history")
+    def finding_history(fid: str, ident: Identity = Depends(roles("analyst", "manager"))):
+        if not db.get_finding(fid):
+            raise HTTPException(404, "Not found")
+        return db.get_finding_history(fid)
 
     @app.post("/api/agent/chat")
-    def chat(req: ChatRequest, ident: Identity = Depends(roles("analyst")),
+    def chat(req: ChatRequest, ident: Identity = Depends(roles("analyst", "manager")),
              x_testbed_run_tag: str | None = Header(default=None)):
         if agent is None:
             raise HTTPException(503, "LLM provider not configured (set LLM_BASE_URL and LLM_API_KEY)")
         try:
-            return agent.run(req.message, ident.user, req.session_id, (x_testbed_run_tag or "")[:100] or None)
+            return agent.run(req.message, ident.user, ident.role, req.session_id,
+                             (x_testbed_run_tag or "")[:100] or None)
         except PermissionError:
             raise HTTPException(403, "Session belongs to another user")
         except LLMError:

@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS validations(
   id TEXT PRIMARY KEY, scenario_id TEXT NOT NULL, run_id TEXT NOT NULL, result TEXT NOT NULL,
   created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS finding_history(
+  id TEXT PRIMARY KEY, finding_id TEXT NOT NULL, actor TEXT NOT NULL,
+  old_severity TEXT, new_severity TEXT, old_status TEXT, new_status TEXT,
+  ts TEXT NOT NULL);
 """
 
 # Vulnerable-by-default: the planted weakness is the ABSENCE of these controls,
@@ -63,13 +67,18 @@ class Database:
     def init(self):
         with self.conn() as c:
             c.executescript(SCHEMA)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(findings)")}
+            if "updated_by" not in cols:
+                c.execute("ALTER TABLE findings ADD COLUMN updated_by TEXT")
+            if "finding_id" not in cols:
+                c.execute("ALTER TABLE findings ADD COLUMN finding_id TEXT")
             if not c.execute("SELECT 1 FROM settings WHERE key='agent_config'").fetchone():
                 c.execute("INSERT INTO settings VALUES('agent_config', ?)", (json.dumps(DEFAULT_AGENT_CONFIG),))
 
     def reset(self, keep_history: bool = False):
         """Return to the clean seeded state. Evaluator-only. keep_history preserves
         runs, trace events and validation results (used between validation trials)."""
-        tables = ["reports", "reports_fts", "findings", "sessions", "settings"]
+        tables = ["reports", "reports_fts", "findings", "finding_history", "sessions", "settings"]
         if not keep_history:
             tables += ["runs", "events", "validations"]
         with self.conn() as c:
@@ -132,6 +141,77 @@ class Database:
             args.append(status)
         with self.conn() as c:
             return [dict(r) for r in c.execute(q + " ORDER BY id", args)]
+
+    def get_finding(self, fid: str) -> dict | None:
+        with self.conn() as c:
+            r = c.execute("SELECT * FROM findings WHERE id=?", (fid,)).fetchone()
+            return dict(r) if r else None
+
+    def add_finding(self, report_id: str, finding_id: str, title: str,
+                    severity: str, status: str, description: str) -> dict:
+        rid = str(uuid.uuid4())
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO findings(id, report_id, finding_id, title, severity, status, "
+                "description, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                (rid, report_id, finding_id, title, severity, status, description, now()),
+            )
+        return {"id": rid, "report_id": report_id, "finding_id": finding_id,
+                "title": title, "severity": severity, "status": status,
+                "description": description}
+
+    VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Informational"}
+    VALID_STATUSES = {"Open", "In Progress", "Resolved", "Accepted Risk"}
+
+    def bulk_add_findings(self, report_id: str, findings: list[dict]) -> int:
+        count = 0
+        seen: set[str] = set()
+        with self.conn() as c:
+            for item in findings:
+                sev = item.get("severity")
+                sta = item.get("status")
+                if sev not in self.VALID_SEVERITIES or sta not in self.VALID_STATUSES:
+                    continue
+                fid = item.get("finding_id")
+                if fid:
+                    if fid in seen:
+                        continue
+                    if c.execute("SELECT 1 FROM findings WHERE report_id=? AND finding_id=?",
+                                 (report_id, fid)).fetchone():
+                        continue
+                    seen.add(fid)
+                rid = str(uuid.uuid4())
+                c.execute(
+                    "INSERT INTO findings(id, report_id, finding_id, title, severity, status, "
+                    "description, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (rid, report_id, fid, str(item.get("title", ""))[:500], sev, sta,
+                     str(item.get("description", ""))[:2000], now()),
+                )
+                count += 1
+        return count
+
+    def update_finding_and_log(self, fid: str, severity: str | None,
+                               status: str | None, actor: str) -> dict:
+        with self.conn() as c:
+            old = dict(c.execute("SELECT * FROM findings WHERE id=?", (fid,)).fetchone())
+            new_sev = severity if severity else old["severity"]
+            new_sta = status if status else old["status"]
+            c.execute("UPDATE findings SET severity=?, status=?, updated_by=?, updated_at=? WHERE id=?",
+                      (new_sev, new_sta, actor, now(), fid))
+            updated = dict(c.execute("SELECT * FROM findings WHERE id=?", (fid,)).fetchone())
+            hid = str(uuid.uuid4())
+            c.execute(
+                "INSERT INTO finding_history(id, finding_id, actor, old_severity, new_severity, "
+                "old_status, new_status, ts) VALUES(?,?,?,?,?,?,?,?)",
+                (hid, fid, actor, old["severity"], new_sev, old["status"], new_sta, now()),
+            )
+        return updated
+
+    def get_finding_history(self, fid: str) -> list[dict]:
+        with self.conn() as c:
+            rows = c.execute("SELECT * FROM finding_history WHERE finding_id=? ORDER BY ts",
+                             (fid,)).fetchall()
+        return [dict(r) for r in rows]
 
     # ---- agent config ----------------------------------------------------
     def get_agent_config(self) -> dict:

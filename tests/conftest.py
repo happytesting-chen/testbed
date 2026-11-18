@@ -3,11 +3,13 @@
 control and validators can be tested deterministically."""
 import json
 import os
+import pathlib
 
 import pytest
 from fastapi.testclient import TestClient
 
 TOKENS = {"ANALYST_TOKEN": "analyst-test-token-0001",
+          "MANAGER_TOKEN": "manager-test-token-0002",
           "EVALUATOR_TOKEN": "evaluator-test-token-0003"}
 
 
@@ -71,5 +73,36 @@ def make_clients(env):
     return make
 
 
+SYNTHETIC_VAPT = (
+    pathlib.Path(__file__).parent / "fixtures" / "vapt_synthetic_v1.md"
+).read_text(encoding="utf-8")
+
+SYNTHETIC_FINDINGS = [
+    {"finding_id": "F-001", "title": "SQL Injection in login endpoint",
+     "severity": "Critical", "status": "Open", "description": "Unparameterized query."},
+    {"finding_id": "F-002", "title": "Reflected XSS in search field",
+     "severity": "High", "status": "Open", "description": "Unencoded input."},
+]
+
+
+def extraction_script(messages, tools):
+    user = " ".join(m.get("content") or "" for m in messages if m.get("role") == "user")
+    if "extract" in user.lower():
+        return _answer(json.dumps(SYNTHETIC_FINDINGS))
+    return susceptible_model(messages, tools)
+
+
 ANALYST = {"Authorization": "Bearer " + TOKENS["ANALYST_TOKEN"]}
+MANAGER = {"Authorization": "Bearer " + TOKENS["MANAGER_TOKEN"]}
 EVAL = {"X-Evaluator-Token": TOKENS["EVALUATOR_TOKEN"]}
+
+
+@pytest.fixture
+def seeded_report_and_finding(env):
+    _, db = env
+    report = db.add_report("test.md", "analyst1", "analyst", "# Test report\nF-001 Critical Open")
+    finding = db.add_finding(
+        report["id"], "F-001", "SQL Injection in login form",
+        "Critical", "Open", "Unparameterized query allows SQLi.",
+    )
+    return report, finding

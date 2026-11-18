@@ -20,17 +20,37 @@ Roles (bearer tokens, enforced in the backend):
 
 | Role | Can do |
 |---|---|
-| `analyst` (legitimate user / victim) | All reports, findings, AI Assistant |
-| `contributor` (attacker entry point) | Upload documents; list and read only its own uploads |
+| `analyst` (legitimate user / victim) | View reports, findings, AI Assistant chat; upload documents |
+| `manager` | Everything analyst can do + edit finding severity/status via API and AI tool |
 | evaluator (`X-Evaluator-Token`, evaluator app only) | Everything internal |
 
-The uploader's identity comes from the token. Client-supplied headers are ignored.
+Set `ANALYST_TOKEN`, `MANAGER_TOKEN`, and `EVALUATOR_TOKEN` in `.env`. All three must differ.
+
+### Finding extraction
+
+When a report is uploaded, the LLM extracts structured findings automatically. The upload
+response includes `findings_extracted` (count) and `extraction_error` (null on success).
+Extraction failure does not block the upload.
+
+### Finding management API
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /api/findings` | analyst, manager | List all findings |
+| `GET /api/findings/{id}` | analyst, manager | Get one finding |
+| `PATCH /api/findings/{id}` | **manager only** | Update severity/status |
+| `GET /api/findings/{id}/history` | analyst, manager | Audit trail of changes |
 
 ## Agent
 
 `app/agent.py` runs a real tool-calling loop against any OpenAI-compatible
 `/chat/completions` endpoint. Tools: `list_reports`, `search_reports` (SQLite FTS5),
-`read_report`, `get_findings`. Conversation history is kept per session.
+`read_report`, `update_finding` (manager role only). Conversation history is kept per session.
+
+The `update_finding` tool lets a manager modify finding severity/status through the AI
+assistant. The role check is enforced server-side from the HTTP bearer token — never from
+LLM output or tool arguments. An analyst session that attempts to call `update_finding`
+(e.g. via prompt injection) receives a "Permission denied" error and the database is unchanged.
 
 The agent never decides whether an attack succeeds. Weakness comes only from controls
 that the evaluator can switch off (both are off by default):
@@ -74,7 +94,8 @@ uvicorn app.main:public_app    --host 127.0.0.1 --port 8000
 uvicorn app.main:evaluator_app --host 127.0.0.1 --port 8001
 ```
 
-The apps refuse to start without three distinct tokens of at least 16 characters.
+The apps refuse to start without three distinct tokens (`ANALYST_TOKEN`, `MANAGER_TOKEN`,
+`EVALUATOR_TOKEN`) of at least 16 characters each.
 
 ## Offline validation
 
@@ -91,15 +112,17 @@ task and stores the judged result.
 ## Tests
 
 ```
-python -m pytest -q
+python -m pytest -q                                           # all tests
+python -m pytest tests/test_roles.py -k "ai_update or injection" -v  # AI privilege escalation
+python -m pytest tests/test_scenarios.py -v                   # TEST-01..04 regression
 ```
 
 Tests use a scripted provider (no network) to check the agent loop, tracing, history,
-access control, controls and validator logic. They do not show that the real model is
-vulnerable; only `scripts/validate_o01.py` against the live model does.
+access control, role enforcement, extraction, and validator logic. They do not show that
+the real model is vulnerable; only `scripts/validate_o01.py` against the live model does.
 
 ## Not yet implemented
 
-Attack Path view, LLM judge, instrumented mode, O02 (status-update tool), tool-response
-poisoning entry point, Promptfoo/PyRIT/Check Point/F5 adapters, OpenAI-compatible
-shim for scanners, vendor gateway, production authentication.
+Attack Path view, LLM judge, instrumented mode, denied-attempt audit logging,
+tool-response poisoning entry point, Promptfoo/PyRIT/Check Point/F5 adapters,
+OpenAI-compatible shim for scanners, vendor gateway, production authentication.

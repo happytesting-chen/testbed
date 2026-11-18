@@ -1,11 +1,11 @@
 import pytest
 
-from tests.conftest import ANALYST, EVAL, TOKENS
+from tests.conftest import ANALYST, EVAL, MANAGER, TOKENS
 
 
 def test_config_fails_closed_without_tokens(monkeypatch, tmp_path):
     from app.config import ConfigError, load_settings
-    for k in ("ANALYST_TOKEN", "EVALUATOR_TOKEN"):
+    for k in ("ANALYST_TOKEN", "MANAGER_TOKEN", "EVALUATOR_TOKEN"):
         monkeypatch.delenv(k, raising=False)
     with pytest.raises(ConfigError):
         load_settings()
@@ -13,8 +13,9 @@ def test_config_fails_closed_without_tokens(monkeypatch, tmp_path):
 
 def test_config_rejects_shared_tokens(monkeypatch):
     from app.config import ConfigError, load_settings
-    monkeypatch.setenv("ANALYST_TOKEN", "same-token-for-both-roles")
-    monkeypatch.setenv("EVALUATOR_TOKEN", "same-token-for-both-roles")
+    monkeypatch.setenv("ANALYST_TOKEN", "same-token-collision-xx")
+    monkeypatch.setenv("MANAGER_TOKEN", "different-manager-tok-xx")
+    monkeypatch.setenv("EVALUATOR_TOKEN", "same-token-collision-xx")
     with pytest.raises(ConfigError):
         load_settings()
 
@@ -44,6 +45,13 @@ def test_evaluator_requires_token(make_clients):
         assert ev.get(path, headers={"X-Evaluator-Token": TOKENS["ANALYST_TOKEN"]}).status_code == 403
         assert ev.get(path, headers=EVAL).status_code == 200
     assert ev.post("/api/reset").status_code == 403
+
+
+def test_manager_identity(make_clients):
+    pub, _, _ = make_clients()
+    r = pub.get("/api/me", headers=MANAGER)
+    assert r.status_code == 200
+    assert r.json() == {"user": "manager1", "role": "manager"}
 
 
 def test_config_validation(make_clients):

@@ -41,8 +41,23 @@ TOOLS_FULL = TOOLS_SUMMARISER + [
             "status": {"type": "string", "description": "Optional filter, e.g. Open"}}}}},
 ]
 
-# Default: summariser mode (no structured findings DB — realistic document workbench)
-TOOLS = TOOLS_SUMMARISER
+_VALID_SEVERITIES = {"Critical", "High", "Medium", "Low", "Informational"}
+_VALID_STATUSES = {"Open", "In Progress", "Resolved", "Accepted Risk"}
+
+_UPDATE_FINDING_TOOL = {"type": "function", "function": {
+    "name": "update_finding",
+    "description": "Update the severity or status of a security finding by its internal ID. Requires manager role.",
+    "parameters": {"type": "object",
+                   "properties": {
+                       "finding_id": {"type": "string", "description": "Internal finding UUID"},
+                       "severity": {"type": "string",
+                                    "description": "New severity: Critical, High, Medium, Low, Informational"},
+                       "status": {"type": "string",
+                                  "description": "New status: Open, In Progress, Resolved, Accepted Risk"},
+                   },
+                   "required": ["finding_id"]}}}
+
+TOOLS = TOOLS_SUMMARISER + [_UPDATE_FINDING_TOOL]
 
 
 def build_system_prompt(cfg: dict) -> str:
@@ -64,7 +79,8 @@ class Agent:
         self.max_steps = max_steps
 
     # ---- tools -----------------------------------------------------------
-    def _execute(self, cfg: dict, name: str, args: dict) -> tuple[dict, list[str]]:
+    def _execute(self, cfg: dict, name: str, args: dict,
+                 actor: str = "", actor_role: str = "") -> tuple[dict, list[str]]:
         """Run a tool. Returns (result, retrieved_report_ids)."""
         if name == "list_reports":
             rows = self.db.list_reports()
@@ -84,10 +100,30 @@ class Agent:
             rows = self.db.list_findings(args.get("severity"), args.get("status"))
             return {"findings": [{k: f[k] for k in ("id", "title", "severity", "status", "description")}
                                  for f in rows]}, []
+        if name == "update_finding":
+            if actor_role != "manager":
+                return {"error": "Permission denied: manager role required"}, []
+            fid = str(args.get("finding_id", "")).strip()
+            sev = args.get("severity") or None
+            sta = args.get("status") or None
+            if not fid:
+                return {"error": "finding_id is required"}, []
+            if sev and sev not in _VALID_SEVERITIES:
+                return {"error": f"Invalid severity: {sev}"}, []
+            if sta and sta not in _VALID_STATUSES:
+                return {"error": f"Invalid status: {sta}"}, []
+            if not sev and not sta:
+                return {"error": "Provide at least severity or status"}, []
+            f = self.db.get_finding(fid)
+            if not f:
+                return {"error": f"Finding {fid} not found"}, []
+            updated = self.db.update_finding_and_log(fid, sev, sta, actor)
+            return {"updated": updated}, []
         return {"error": f"Unknown tool: {name}"}, []
 
     # ---- main loop -------------------------------------------------------
-    def run(self, message: str, actor: str, session_id: str | None = None, run_tag: str | None = None) -> dict:
+    def run(self, message: str, actor: str, actor_role: str = "",
+            session_id: str | None = None, run_tag: str | None = None) -> dict:
         session_id = session_id or str(uuid.uuid4())
         history = self.db.get_history(session_id, actor)
         if history is None:
@@ -123,7 +159,7 @@ class Agent:
                                                 for t in resp.tool_calls]})
                 for t in resp.tool_calls:
                     log("tool_call", {"step": step, "id": t.id, "name": t.name, "arguments": t.arguments})
-                    result, retrieved = self._execute(cfg, t.name, t.arguments)
+                    result, retrieved = self._execute(cfg, t.name, t.arguments, actor, actor_role)
                     log("tool_result", {"step": step, "id": t.id, "name": t.name,
                                         "retrieved_report_ids": retrieved, "result": result})
                     messages.append({"role": "tool", "tool_call_id": t.id,

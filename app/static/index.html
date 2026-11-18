@@ -108,6 +108,16 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
         <pre id="vc"></pre>
       </div>
 
+      <div class="panel" id="findings-panel">
+        <div style="font-weight:650;font-size:.85rem;margin-bottom:.4rem">Findings</div>
+        <table>
+          <thead>
+            <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Updated by</th><th></th></tr>
+          </thead>
+          <tbody id="findings-body"></tbody>
+        </table>
+      </div>
+
       <!-- TEST-04 system prompt leakage with canary -->
       <div class="panel">
         <div style="font-weight:650;color:var(--accent);font-size:.85rem;margin-bottom:.3rem">Test 4 — System Prompt Leakage (Canary)</div>
@@ -194,7 +204,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
   </div><!-- /workspace -->
 </main>
 <script>
-let token="",session=null;
+let token="",session=null,role="";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -224,10 +234,11 @@ $("go").onclick=async()=>{
   token=$("tok").value.trim();
   try{
     const me=await api("/api/me");
+    role=me.role;
     $("who").textContent=me.user+" ("+me.role+")";
     $("signin").hidden=true;
     $("workspace").classList.add("on");
-    loadReports();loadCanary();
+    loadReports();loadFindings();loadCanary();
   }catch(e){$("sierr").textContent="Sign-in failed: "+e.message}
 };
 
@@ -301,7 +312,7 @@ $("up").onsubmit=async e=>{
   try{
     const r=await api("/api/reports/upload",{method:"POST",body:fd});
     $("upmsg").textContent="✓ Uploaded "+r.filename;
-    loadReports();
+    loadReports();loadFindings();
   }catch(err){$("upmsg").textContent=err.message}
 };
 
@@ -414,6 +425,56 @@ document.querySelectorAll(".atk-btn").forEach(b=>b.onclick=()=>{
   session=null;$("log").innerHTML="";
   sendMessage(b.dataset.atk);
 });
+
+// ── findings ─────────────────────────────────────────────────────────────────
+const SEV_COLOR={Critical:"var(--crit)",High:"var(--high)",Medium:"var(--med)",Low:"var(--ok)",Informational:"var(--muted)"};
+
+async function loadFindings(){
+  const rows=await api("/api/findings").catch(()=>[]);
+  if(!rows.length){
+    $("findings-body").innerHTML="<tr><td colspan=6 style='color:var(--muted)'>No findings yet.</td></tr>";
+    return;
+  }
+  $("findings-body").innerHTML=rows.map(f=>{
+    const sevCell=role==="manager"
+      ?`<select data-fid="${esc(f.id)}" data-field="severity">${
+          ["Critical","High","Medium","Low","Informational"]
+            .map(s=>`<option${s===f.severity?" selected":""}>${s}</option>`).join("")}</select>`
+      :`<span style="color:${SEV_COLOR[f.severity]||''};font-weight:600">${esc(f.severity)}</span>`;
+    const staCell=role==="manager"
+      ?`<select data-fid="${esc(f.id)}" data-field="status">${
+          ["Open","In Progress","Resolved","Accepted Risk"]
+            .map(s=>`<option${s===f.status?" selected":""}>${s}</option>`).join("")}</select>`
+      :esc(f.status);
+    const saveBtn=role==="manager"
+      ?`<button class="act" style="font-size:.75rem;padding:.2rem .5rem" onclick="saveFinding('${esc(f.id)}')">Save</button> `:"";
+    return `<tr>
+      <td style="font-size:.85rem;font-weight:600">${esc(f.finding_id||"—")}</td>
+      <td style="font-size:.85rem">${esc(f.title)}</td>
+      <td>${sevCell}</td><td>${staCell}</td>
+      <td style="font-size:.8rem;color:var(--muted)">${esc(f.updated_by||"—")}</td>
+      <td style="white-space:nowrap">${saveBtn}<a href="#" style="font-size:.75rem" onclick="showHistory('${esc(f.id)}');return false">History</a></td>
+    </tr>`;
+  }).join("");
+}
+
+async function saveFinding(id){
+  const body={};
+  document.querySelectorAll(`select[data-fid="${id}"]`)
+    .forEach(s=>{body[s.dataset.field]=s.value;});
+  try{
+    await api(`/api/findings/${id}`,
+      {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    loadFindings();
+  }catch(e){alert("Save failed: "+e.message);}
+}
+
+async function showHistory(id){
+  const h=await api(`/api/findings/${id}/history`);
+  alert(h.length
+    ?h.map(e=>`${e.ts.slice(0,16)} ${e.actor}: severity ${e.old_severity}→${e.new_severity||"—"}, status ${e.old_status}→${e.new_status||"—"}`).join("\n")
+    :"No modifications yet.");
+}
 
 async function runTest04MultiTurn(){
   session=null;$("log").innerHTML="";

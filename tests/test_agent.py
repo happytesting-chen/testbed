@@ -13,7 +13,8 @@ def test_agent_trace_records_real_tool_loop(make_clients):
     assert stages[0] == "user_input" and stages[-1] == "final_answer"
     assert stages.count("llm_request") == 2 and {"tool_call", "tool_result"} <= set(stages)
     req = next(e for e in t["events"] if e["stage"] == "llm_request")["payload"]["body"]
-    assert {x["function"]["name"] for x in req["tools"]} == {"list_reports", "search_reports", "read_report"}
+    assert {x["function"]["name"] for x in req["tools"]} == {
+        "list_reports", "search_reports", "read_report", "update_finding"}
     res = [e for e in t["events"] if e["stage"] == "tool_result" and e["payload"]["name"] == "search_reports"][0]
     assert res["payload"]["retrieved_report_ids"] is not None
     assert t["run"]["external_run_tag"] == "unit"
