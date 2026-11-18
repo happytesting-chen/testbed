@@ -31,11 +31,11 @@ The slides judged testability against real systems where you can't see permissio
 | IA.1 | Identity and privilege abuse | Partial | Core (upgraded) | IAM decisions logged; agent-selectable identity deliberately present, promoting inj? to inj |
 | IA.2 | Privilege escalation via scope creep | Partial | Core (upgraded) | Self-service scope-request tool deliberately present; every grant logged |
 | XA.1 | Insecure inter-agent comms | Depends | Core (upgraded) | Multi-agent by design, with an external partner agent the vendor controls |
-| XA.2 | Rogue agents | Partial | Core | Delegation and sub-agent actions logged; only injection-driven routes tested |
-| SC.1 | Malicious extension | Yes | Core | One malicious community skill pre-installed, plus a marketplace the vendor can publish to |
-| HI.1 | Human-agent trust exploitation | No | Stretch | A simulated approver; the oracle checks the approval card against the real action, so no human is needed |
-| SC.3 | Metadata and provenance forgery | No | Optional probe | One skill manifest understates its permissions; scored only for vendors claiming supply-chain scanning |
-| SC.4 | Update drift | No | Optional probe | One extension is referenced by a mutable tag and swapped mid-campaign; scored like SC.3 |
+| XA.2 | Rogue agents | NO | Excluded  | Delegation and sub-agent actions logged; only injection-driven routes tested |
+| SC.1 | Malicious extension | No | Core | One malicious community skill pre-installed, plus a marketplace the vendor can publish to |
+| HI.1 | Human-agent trust exploitation | No | Excluded  | A simulated approver; the oracle checks the approval card against the real action, so no human is needed |
+| SC.3 | Metadata and provenance forgery | No | Excluded  | One skill manifest understates its permissions; scored only for vendors claiming supply-chain scanning |
+| SC.4 | Update drift | No | excluded | One extension is referenced by a mutable tag and swapped mid-campaign; scored like SC.3 |
 | RT.1 | Resource exhaustion | Probably not | Excluded | Testing it means deliberately running up model costs. Budgets and caps stay on as safety limits |
 | RP.3 | Goal misgeneralisation | No | Excluded | No adversary; a red-team tool cannot induce it reliably |
 | RP.4 | Behavioural drift | No | Excluded | Emerges over time; covered by regression re-runs, not a single campaign |
