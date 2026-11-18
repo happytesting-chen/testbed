@@ -27,7 +27,7 @@ The slides judged testability against real systems where you can't see permissio
 | RP.2 | Agent goal hijack | Yes | Core | Each session's declared goal and live plan are exposed in traces, so plan deviation is observable |
 | KM.1 | Memory and context poisoning | Yes | Core | Long-term, shared and RAG memory are inspectable; a victim simulator shows cross-session effects |
 | TA.1 | Tool misuse and exploitation | Yes | Core | Every tool call and its downstream effect is logged |
-| TA.2 | Tool poisoning | Yes | Core | Hosts third-party MCP servers, one of which the vendor controls |
+| TA.2 | Tool poisoning | No | Excluded | Hosts third-party MCP servers, one of which the vendor controls |
 | IA.1 | Identity and privilege abuse | Partial | Core (upgraded) | IAM decisions logged; agent-selectable identity deliberately present, promoting inj? to inj |
 | IA.2 | Privilege escalation via scope creep | Partial | Core (upgraded) | Self-service scope-request tool deliberately present; every grant logged |
 | XA.1 | Insecure inter-agent comms | Depends | Core (upgraded) | Multi-agent by design, with an external partner agent the vendor controls |
