@@ -135,7 +135,8 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
         result = db.add_report(name[:200], ident.user, ident.role, content)
         ext = extractor.extract_findings(agent.provider if agent else None, content)
         count = db.bulk_add_findings(result["id"], ext["findings"])
-        return {**result, "findings_extracted": count, "extraction_error": ext["error"]}
+        return {**result, "findings_extracted": count, "extraction_error": ext["error"],
+                "extraction_truncated": ext.get("truncated", False)}
 
     @app.get("/api/findings")
     def findings_list(ident: Identity = Depends(roles("analyst", "manager"))):

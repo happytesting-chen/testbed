@@ -16,6 +16,10 @@ Two separate apps share one SQLite database:
 The public app contains no evaluator routes at all, so "black-box mode" is enforced by
 which server a tester can reach, not by hiding UI tabs.
 
+The evaluator app exposes unauthenticated `/api/telemetry` endpoints for external testing
+tools — these return only observable agent behaviour (no system prompt, no raw LLM messages).
+Bind the evaluator to `127.0.0.1` only; never expose it on a network-accessible interface.
+
 Roles (bearer tokens, enforced in the backend):
 
 | Role | Can do |
@@ -45,7 +49,8 @@ Extraction failure does not block the upload.
 
 `app/agent.py` runs a real tool-calling loop against any OpenAI-compatible
 `/chat/completions` endpoint. Tools: `list_reports`, `search_reports` (SQLite FTS5),
-`read_report`, `update_finding` (manager role only). Conversation history is kept per session.
+`read_report`, `get_findings`, `update_finding` (manager role only).
+Conversation history is kept per session.
 
 The `update_finding` tool lets a manager modify finding severity/status through the AI
 assistant. The role check is enforced server-side from the HTTP bearer token — never from

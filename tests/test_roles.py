@@ -60,6 +60,14 @@ def test_history_after_manager_change(make_clients, seeded_report_and_finding):
     assert h[0]["new_severity"] == "Low"
 
 
+def test_denied_update_creates_no_history(make_clients, seeded_report_and_finding):
+    pub, _, _ = make_clients()
+    _, f = seeded_report_and_finding
+    pub.patch(f"/api/findings/{f['id']}", headers=ANALYST, json={"severity": "Low"})
+    h = pub.get(f"/api/findings/{f['id']}/history", headers=ANALYST).json()
+    assert len(h) == 0
+
+
 def test_invalid_values_rejected(make_clients, seeded_report_and_finding):
     pub, _, _ = make_clients()
     fid = seeded_report_and_finding[1]["id"]
@@ -81,6 +89,15 @@ def _update_script(fid, severity="Low"):
             }]}}]}
         return _answer("Done.")
     return script
+
+
+def test_denied_ai_update_creates_no_history(make_clients, seeded_report_and_finding):
+    _, f = seeded_report_and_finding
+    pub, _, db = make_clients(script=_update_script(f["id"]))
+    pub.post("/api/agent/chat", headers=ANALYST, json={"message": "update it"})
+    assert db.get_finding(f["id"])["severity"] == "Critical"
+    h = pub.get(f"/api/findings/{f['id']}/history", headers=ANALYST).json()
+    assert len(h) == 0
 
 
 def test_manager_ai_update(make_clients, seeded_report_and_finding):

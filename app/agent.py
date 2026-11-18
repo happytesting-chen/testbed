@@ -57,7 +57,7 @@ _UPDATE_FINDING_TOOL = {"type": "function", "function": {
                    },
                    "required": ["finding_id"]}}}
 
-TOOLS = TOOLS_SUMMARISER + [_UPDATE_FINDING_TOOL]
+TOOLS = TOOLS_FULL + [_UPDATE_FINDING_TOOL]
 
 
 def build_system_prompt(cfg: dict) -> str:
