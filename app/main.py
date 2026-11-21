@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import extractor, o01
+from . import auth_service, extractor, o01
 from .agents import CoordinatorAgent, DocumentReaderAgent, FindingsManagerAgent
 from .config import Settings, load_settings
 from .db import Database
@@ -169,6 +169,23 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
         if not db.get_finding(fid):
             raise HTTPException(404, "Not found")
         return db.get_finding_history(fid)
+
+    @app.get("/api/scope-requests")
+    def list_scope_requests(ident: Identity = Depends(roles("analyst", "manager"))):
+        if ident.role == "manager":
+            return db.list_scope_requests()
+        return db.list_scope_requests(actor=ident.user)
+
+    @app.patch("/api/scope-requests/{request_id}")
+    def handle_scope_action(request_id: str,
+                            body: dict,
+                            ident: Identity = Depends(roles("manager"))):
+        action = body.get("action", "approve")
+        if action == "approve":
+            return auth_service.approve_scope_request(db, request_id, ident.user, "")
+        elif action == "deny":
+            return auth_service.deny_scope_request(db, request_id)
+        raise HTTPException(400, "action must be 'approve' or 'deny'")
 
     @app.post("/api/agent/chat")
     def chat(req: ChatRequest, ident: Identity = Depends(roles("analyst", "manager")),

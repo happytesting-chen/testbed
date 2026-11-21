@@ -1,6 +1,7 @@
 """Findings Manager Agent — retrieves and updates security findings."""
 import json
 
+from .. import auth_service
 from ..db import Database
 from ..llm import LLMError
 from .delegation import DelegationContext
@@ -52,19 +53,22 @@ class FindingsManagerAgent:
         self.max_steps = max_steps
 
     def _execute(self, name: str, args: dict,
-                 actor: str, actor_role: str) -> tuple[dict, list[str]]:
+                 actor: str, actor_role: str,
+                 session_id: str = "") -> tuple[dict, list[str]]:
         if name == "get_findings":
             rows = self.db.list_findings(args.get("severity"), args.get("status"))
             return {"findings": [{k: f[k] for k in ("id", "title", "severity", "status", "description")}
                                  for f in rows]}, []
         if name == "update_finding":
-            if actor_role != "manager":
-                return {"error": "Permission denied: manager role required"}, []
             fid = str(args.get("finding_id", "")).strip()
-            sev = args.get("severity") or None
-            sta = args.get("status") or None
             if not fid:
                 return {"error": "finding_id is required"}, []
+            allowed, grant_id = auth_service.check_effective_permissions(
+                self.db, actor, actor_role, fid, session_id)
+            if not allowed:
+                return {"error": "Permission denied: manager role or active scope grant required"}, []
+            sev = args.get("severity") or None
+            sta = args.get("status") or None
             if sev and sev not in _VALID_SEVERITIES:
                 return {"error": f"Invalid severity: {sev}"}, []
             if sta and sta not in _VALID_STATUSES:
@@ -74,7 +78,7 @@ class FindingsManagerAgent:
             f = self.db.get_finding(fid)
             if not f:
                 return {"error": f"Finding {fid} not found"}, []
-            updated = self.db.update_finding_and_log(fid, sev, sta, actor)
+            updated = self.db.update_finding_and_log(fid, sev, sta, actor, grant_id)
             return {"updated": updated}, []
         if name == "get_finding_history":
             fid = str(args.get("finding_id", "")).strip()
@@ -88,6 +92,7 @@ class FindingsManagerAgent:
                run_id: str, log_fn) -> str:
         actor = delegation.actor
         actor_role = delegation.actor_role
+        session_id = delegation.session_id
         messages = [
             {"role": "system", "content": FM_SYSTEM_PROMPT},
             {"role": "user", "content": f"Task: {delegation.task}\n\nContext: {delegation.context}"},
@@ -112,7 +117,7 @@ class FindingsManagerAgent:
             for t in resp.tool_calls:
                 log_fn("tool_call", {"agent": "findings_manager", "step": step,
                                      "id": t.id, "name": t.name, "arguments": t.arguments})
-                result, retrieved = self._execute(t.name, t.arguments, actor, actor_role)
+                result, retrieved = self._execute(t.name, t.arguments, actor, actor_role, session_id)
                 log_fn("tool_result", {"agent": "findings_manager", "step": step,
                                        "id": t.id, "name": t.name,
                                        "retrieved_report_ids": retrieved, "result": result})

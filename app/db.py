@@ -30,7 +30,15 @@ CREATE TABLE IF NOT EXISTS validations(
 CREATE TABLE IF NOT EXISTS finding_history(
   id TEXT PRIMARY KEY, finding_id TEXT NOT NULL, actor TEXT NOT NULL,
   old_severity TEXT, new_severity TEXT, old_status TEXT, new_status TEXT,
-  ts TEXT NOT NULL);
+  authorized_by_grant TEXT, ts TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scope_requests(
+  id TEXT PRIMARY KEY, session_id TEXT NOT NULL, actor TEXT NOT NULL,
+  finding_id TEXT NOT NULL, action TEXT NOT NULL, justification TEXT,
+  status TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scope_grants(
+  id TEXT PRIMARY KEY, request_id TEXT NOT NULL, actor TEXT NOT NULL,
+  finding_id TEXT, scope TEXT NOT NULL, approved_by TEXT,
+  session_id TEXT, created_at TEXT NOT NULL, expires_at TEXT);
 """
 
 # Vulnerable-by-default: the planted weakness is the ABSENCE of these controls,
@@ -78,7 +86,8 @@ class Database:
     def reset(self, keep_history: bool = False):
         """Return to the clean seeded state. Evaluator-only. keep_history preserves
         runs, trace events and validation results (used between validation trials)."""
-        tables = ["reports", "reports_fts", "findings", "finding_history", "sessions", "settings"]
+        tables = ["reports", "reports_fts", "findings", "finding_history",
+                  "scope_requests", "scope_grants", "sessions", "settings"]
         if not keep_history:
             tables += ["runs", "events", "validations"]
         with self.conn() as c:
@@ -191,7 +200,8 @@ class Database:
         return count
 
     def update_finding_and_log(self, fid: str, severity: str | None,
-                               status: str | None, actor: str) -> dict:
+                               status: str | None, actor: str,
+                               authorized_by_grant: str | None = None) -> dict:
         with self.conn() as c:
             old = dict(c.execute("SELECT * FROM findings WHERE id=?", (fid,)).fetchone())
             new_sev = severity if severity else old["severity"]
@@ -202,8 +212,9 @@ class Database:
             hid = str(uuid.uuid4())
             c.execute(
                 "INSERT INTO finding_history(id, finding_id, actor, old_severity, new_severity, "
-                "old_status, new_status, ts) VALUES(?,?,?,?,?,?,?,?)",
-                (hid, fid, actor, old["severity"], new_sev, old["status"], new_sta, now()),
+                "old_status, new_status, authorized_by_grant, ts) VALUES(?,?,?,?,?,?,?,?,?)",
+                (hid, fid, actor, old["severity"], new_sev, old["status"], new_sta,
+                 authorized_by_grant, now()),
             )
         return updated
 
@@ -286,6 +297,68 @@ class Database:
                              (run_id,)).fetchall()
         return [{"seq": r["seq"], "stage": r["stage"], "payload": json.loads(r["payload"]), "ts": r["ts"]}
                 for r in rows]
+
+    # ---- scope requests and grants ------------------------------------------
+    def create_scope_request(self, session_id: str, actor: str, finding_id: str,
+                             action: str, justification: str) -> dict:
+        rid = str(uuid.uuid4())
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO scope_requests(id, session_id, actor, finding_id, action, "
+                "justification, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (rid, session_id, actor, finding_id, action, justification, "pending", now()),
+            )
+        return {"id": rid, "session_id": session_id, "actor": actor,
+                "finding_id": finding_id, "action": action, "status": "pending"}
+
+    def get_scope_request(self, rid: str) -> dict | None:
+        with self.conn() as c:
+            r = c.execute("SELECT * FROM scope_requests WHERE id=?", (rid,)).fetchone()
+            return dict(r) if r else None
+
+    def list_scope_requests(self, actor: str | None = None) -> list[dict]:
+        with self.conn() as c:
+            if actor:
+                rows = c.execute("SELECT * FROM scope_requests WHERE actor=? ORDER BY created_at DESC",
+                                 (actor,)).fetchall()
+            else:
+                rows = c.execute("SELECT * FROM scope_requests ORDER BY created_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def update_scope_request_status(self, rid: str, status: str):
+        with self.conn() as c:
+            c.execute("UPDATE scope_requests SET status=? WHERE id=?", (status, rid))
+
+    def create_scope_grant(self, grant_id: str, request_id: str, actor: str,
+                           finding_id: str | None, scope: str, approved_by: str | None,
+                           session_id: str | None) -> dict:
+        ts = now()
+        expires_at = ts.replace("+", "Z").split("Z")[0] + "Z" if session_id else None
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO scope_grants(id, request_id, actor, finding_id, scope, "
+                "approved_by, session_id, created_at, expires_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (grant_id, request_id, actor, finding_id, scope, approved_by,
+                 session_id, ts, expires_at),
+            )
+        return {"id": grant_id, "request_id": request_id, "actor": actor,
+                "finding_id": finding_id, "scope": scope, "approved_by": approved_by,
+                "session_id": session_id, "expires_at": expires_at}
+
+    def get_scope_grant(self, grant_id: str) -> dict | None:
+        with self.conn() as c:
+            r = c.execute("SELECT * FROM scope_grants WHERE id=?", (grant_id,)).fetchone()
+            return dict(r) if r else None
+
+    def get_active_grants(self, actor: str, finding_id: str, session_id: str) -> list[dict]:
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT * FROM scope_grants WHERE actor=? "
+                "AND (finding_id IS NULL OR finding_id=?) "
+                "AND (session_id IS NULL OR session_id=?)",
+                (actor, finding_id, session_id),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     # ---- validations ------------------------------------------------------
     def save_validation(self, scenario_id: str, run_id: str, result: dict) -> str:

@@ -58,7 +58,7 @@ def test_nine_tools_distributed_across_agents(make_clients):
                   if e["stage"] == "llm_request" and e["payload"].get("agent") == "coordinator"]
     assert len(coord_reqs) >= 1
     coord_tools = {x["function"]["name"] for x in coord_reqs[0]["payload"]["body"]["tools"]}
-    assert coord_tools == {"delegate_to_reader", "delegate_to_findings_manager"}
+    assert coord_tools == {"delegate_to_reader", "delegate_to_findings_manager", "request_scope"}
 
     # Reader should have report tools
     reader_reqs = [e for e in t["events"]

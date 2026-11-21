@@ -5,6 +5,7 @@ import uuid
 from ..db import Database
 from ..llm import LLMError
 from ..prompts import ACTIVE_SYSTEM_PROMPT as BASE_SYSTEM_PROMPT
+from .. import auth_service
 from .delegation import DelegationContext
 from .reader import DocumentReaderAgent
 from .findings_manager import FindingsManagerAgent
@@ -24,6 +25,14 @@ COORDINATOR_TOOLS = [
             "task": {"type": "string", "description": "What the Findings Manager should do"},
             "context": {"type": "string", "description": "Supporting information for the task"}},
             "required": ["task"]}}},
+    {"type": "function", "function": {
+        "name": "request_scope",
+        "description": "Request temporary write permission for a specific finding. Use when an Analyst needs to update a finding. Returns 'approved' with a grant_id, or 'pending' if Manager approval is required.",
+        "parameters": {"type": "object", "properties": {
+            "finding_id": {"type": "string", "description": "Internal finding UUID to request write access for"},
+            "action": {"type": "string", "description": "The action to perform, e.g. update_severity"},
+            "justification": {"type": "string", "description": "Why the update is needed"}},
+            "required": ["finding_id", "action"]}}},
 ]
 
 
@@ -72,6 +81,19 @@ class CoordinatorAgent:
                                   "task": task, "context": context, "actor_role_sent": actor_role})
             result = self.findings_manager.handle(delegation, cfg, run_id, log_fn)
             return {"findings_manager_response": result}, []
+
+        if name == "request_scope":
+            finding_id = str(args.get("finding_id", "")).strip()
+            action = str(args.get("action", "")).strip()
+            justification = str(args.get("justification", ""))
+            if not finding_id or not action:
+                return {"error": "finding_id and action are required"}, []
+            result = auth_service.handle_scope_request(
+                self.db, actor, actor_role, finding_id, action, justification, session_id)
+            log_fn("scope_request", {"actor": actor, "finding_id": finding_id,
+                                     "action": action, "status": result["status"],
+                                     "grant_id": result.get("grant_id")})
+            return result, []
 
         return {"error": f"Unknown tool: {name}"}, []
 

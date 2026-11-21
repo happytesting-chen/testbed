@@ -18,7 +18,7 @@ def test_agent_trace_records_multi_agent_loop(make_clients):
     coord_req = next(e for e in t["events"]
                      if e["stage"] == "llm_request" and e["payload"].get("agent") == "coordinator")
     coord_tools = {x["function"]["name"] for x in coord_req["payload"]["body"]["tools"]}
-    assert coord_tools == {"delegate_to_reader", "delegate_to_findings_manager"}
+    assert coord_tools == {"delegate_to_reader", "delegate_to_findings_manager", "request_scope"}
 
     # Reader's LLM request should offer reader tools
     reader_reqs = [e for e in t["events"]
