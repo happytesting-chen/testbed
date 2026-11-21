@@ -2,10 +2,10 @@
 import json
 import uuid
 
+from .. import auth_service, flags
 from ..db import Database
 from ..llm import LLMError
 from ..prompts import ACTIVE_SYSTEM_PROMPT as BASE_SYSTEM_PROMPT
-from .. import auth_service
 from .delegation import DelegationContext
 from .reader import DocumentReaderAgent
 from .findings_manager import FindingsManagerAgent
@@ -34,6 +34,24 @@ COORDINATOR_TOOLS = [
             "justification": {"type": "string", "description": "Why the update is needed"}},
             "required": ["finding_id", "action"]}}},
 ]
+
+
+def _extract_structured_params(context: str) -> dict:
+    """Extract validated operational parameters from Reader output.
+    Used by the secure path (XA1-02 OFF) to separate trusted fields
+    from lower-trust narrative."""
+    import re
+    params = {}
+    fids = re.findall(r'\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b', context)
+    if fids:
+        params["finding_ids"] = fids
+    for sev in ("Critical", "High", "Medium", "Low", "Informational"):
+        if sev in context:
+            params.setdefault("severities_mentioned", []).append(sev)
+    for sta in ("Open", "In Progress", "Resolved", "Accepted Risk"):
+        if sta in context:
+            params.setdefault("statuses_mentioned", []).append(sta)
+    return params
 
 
 def build_system_prompt(cfg: dict) -> str:
@@ -71,14 +89,24 @@ class CoordinatorAgent:
         if name == "delegate_to_findings_manager":
             task = str(args.get("task", ""))
             context = str(args.get("context", ""))
+            if flags.is_on("XA1-02"):
+                # INTENTIONAL VULNERABILITY XA1-02: raw Reader output as undifferentiated context
+                fm_context = context
+                fm_structured = None
+            else:
+                fm_structured = _extract_structured_params(context)
+                fm_context = context
             delegation = DelegationContext(
                 msg_id=str(uuid.uuid4()),
                 from_agent="coordinator", to_agent="findings_manager",
                 session_id=session_id, actor=actor, actor_role=actor_role,
-                task=task, context=context,
+                task=task, context=fm_context,
+                structured_params=fm_structured,
             )
             log_fn("delegation", {"from_agent": "coordinator", "to_agent": "findings_manager",
-                                  "task": task, "context": context, "actor_role_sent": actor_role})
+                                  "task": task, "context": fm_context,
+                                  "structured_params": fm_structured,
+                                  "actor_role_sent": actor_role})
             result = self.findings_manager.handle(delegation, cfg, run_id, log_fn)
             return {"findings_manager_response": result}, []
 
@@ -93,6 +121,10 @@ class CoordinatorAgent:
             log_fn("scope_request", {"actor": actor, "finding_id": finding_id,
                                      "action": action, "status": result["status"],
                                      "grant_id": result.get("grant_id")})
+            if result.get("shadow_violation"):
+                log_fn("shadow_violation", {"vuln_id": result["shadow_violation"],
+                                           "detail": {"grant_id": result.get("grant_id"),
+                                                      "request_id": result.get("request_id")}})
             return result, []
 
         return {"error": f"Unknown tool: {name}"}, []

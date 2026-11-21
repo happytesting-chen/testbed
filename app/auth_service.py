@@ -5,6 +5,7 @@ for a specific finding. A Manager must approve. The grant is scoped to
 the requested finding and expires at session end.
 """
 import uuid
+from . import flags
 from .db import Database, now
 
 
@@ -16,6 +17,13 @@ def handle_scope_request(db: Database, actor: str, actor_role: str,
         grant = _create_grant(db, request, actor, finding_id,
                               approved_by=actor, session_id=session_id)
         return {"status": "approved", "grant_id": grant["id"], "request_id": request["id"]}
+    if flags.is_on("IA2-01"):
+        # INTENTIONAL VULNERABILITY IA2-01: auto-approve without Manager
+        grant = _create_grant(db, request, actor, finding_id,
+                              approved_by=None, session_id=session_id)
+        db.update_scope_request_status(request["id"], "approved")
+        return {"status": "approved", "grant_id": grant["id"], "request_id": request["id"],
+                "shadow_violation": "IA2-01"}
     return {"status": "pending", "request_id": request["id"]}
 
 
