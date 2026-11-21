@@ -20,14 +20,14 @@ def handle_scope_request(db: Database, actor: str, actor_role: str,
 
 
 def approve_scope_request(db: Database, request_id: str,
-                          manager_user: str, session_id: str) -> dict:
+                          manager_user: str) -> dict:
     request = db.get_scope_request(request_id)
     if not request:
         return {"error": "Scope request not found"}
     if request["status"] != "pending":
         return {"error": f"Request is already {request['status']}"}
     grant = _create_grant(db, request, request["actor"], request["finding_id"],
-                          approved_by=manager_user, session_id=session_id)
+                          approved_by=manager_user, session_id=request["session_id"])
     db.update_scope_request_status(request_id, "approved")
     return {"status": "approved", "grant_id": grant["id"], "request_id": request_id}
 

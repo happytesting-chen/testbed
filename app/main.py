@@ -182,7 +182,7 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
                             ident: Identity = Depends(roles("manager"))):
         action = body.get("action", "approve")
         if action == "approve":
-            return auth_service.approve_scope_request(db, request_id, ident.user, "")
+            return auth_service.approve_scope_request(db, request_id, ident.user)
         elif action == "deny":
             return auth_service.deny_scope_request(db, request_id)
         raise HTTPException(400, "action must be 'approve' or 'deny'")
@@ -273,7 +273,6 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
                 "created_at": r["created_at"],
                 "actor": r["actor"],
                 "model": r["model"],
-                "external_run_tag": r.get("external_run_tag"),
                 "prompt_preview": (r.get("prompt") or "")[:80],
             }
             for r in runs

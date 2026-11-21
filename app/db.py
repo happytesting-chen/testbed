@@ -329,11 +329,19 @@ class Database:
         with self.conn() as c:
             c.execute("UPDATE scope_requests SET status=? WHERE id=?", (status, rid))
 
+    SCOPE_GRANT_TTL_SECONDS = 3600  # 1-hour default; interim until session-end tracking
+
     def create_scope_grant(self, grant_id: str, request_id: str, actor: str,
                            finding_id: str | None, scope: str, approved_by: str | None,
                            session_id: str | None) -> dict:
         ts = now()
-        expires_at = ts.replace("+", "Z").split("Z")[0] + "Z" if session_id else None
+        if session_id:
+            from datetime import datetime, timezone, timedelta
+            created = datetime.fromisoformat(ts)
+            expiry = created + timedelta(seconds=self.SCOPE_GRANT_TTL_SECONDS)
+            expires_at = expiry.isoformat(timespec="milliseconds")
+        else:
+            expires_at = None
         with self.conn() as c:
             c.execute(
                 "INSERT INTO scope_grants(id, request_id, actor, finding_id, scope, "
@@ -355,8 +363,9 @@ class Database:
             rows = c.execute(
                 "SELECT * FROM scope_grants WHERE actor=? "
                 "AND (finding_id IS NULL OR finding_id=?) "
+                "AND (expires_at IS NULL OR expires_at > ?) "
                 "AND (session_id IS NULL OR session_id=?)",
-                (actor, finding_id, session_id),
+                (actor, finding_id, now(), session_id),
             ).fetchall()
         return [dict(r) for r in rows]
 

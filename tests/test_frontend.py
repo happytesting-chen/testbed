@@ -45,6 +45,16 @@ def test_telemetry_excludes_sensitive_fields(make_clients):
         assert "retrieved_report_ids" not in tc
 
 
+def test_telemetry_list_excludes_run_tag(make_clients):
+    pub, ev, _ = make_clients()
+    pub.post("/api/agent/chat", headers={**ANALYST, "X-Testbed-Run-Tag": "secret-tag"},
+             json={"message": "test"})
+    tl = ev.get("/api/telemetry").json()
+    assert len(tl) >= 1
+    for entry in tl:
+        assert "external_run_tag" not in entry, "Telemetry list must not expose external_run_tag"
+
+
 def test_telemetry_includes_basic_fields(make_clients):
     pub, ev, _ = make_clients()
     r = pub.post("/api/agent/chat", headers=ANALYST,
