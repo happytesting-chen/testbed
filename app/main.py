@@ -195,6 +195,10 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
     def home():
         return FileResponse(STATIC / "evaluator.html")
 
+    @app.get("/app")
+    def internal_app():
+        return FileResponse(STATIC / "index_internal.html")
+
     @app.get("/api/runs", dependencies=guard)
     def runs():
         return db.list_runs()
@@ -208,11 +212,11 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
 
     @app.get("/api/telemetry/{run_id}")
     def telemetry(run_id: str):
-        """Minimal telemetry endpoint — safe to share with external testing tools.
+        """Grey-box telemetry — safe to share with external testing tools.
 
-        Returns only observable agent behaviour (input, output, tool calls, tool results).
-        Strips: system prompt, raw LLM requests/responses, internal agent config, canary.
-        No authentication required — this is the public-facing telemetry surface.
+        Returns only observable agent behaviour: tool names and steps.
+        Strips: system prompt, raw LLM bodies, tool arguments, tool results,
+        retrieved_report_ids, external_run_tag, agent_config, error details.
         """
         run = db.get_run(run_id)
         if not run:
@@ -224,16 +228,6 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
             if e["stage"] == "tool_call":
                 tool_calls.append({
                     "name": e["payload"].get("name"),
-                    "arguments": e["payload"].get("arguments", {}),
-                    "step": e["payload"].get("step"),
-                })
-            elif e["stage"] == "tool_result":
-                # Include tool result content but strip any report content
-                # that might contain sensitive data beyond the tool name and IDs
-                result = e["payload"].get("result", {})
-                tool_calls.append({
-                    "name": e["payload"].get("name") + "_result",
-                    "retrieved_report_ids": e["payload"].get("retrieved_report_ids", []),
                     "step": e["payload"].get("step"),
                 })
 
@@ -244,14 +238,8 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
             "model": run.get("model"),
             "prompt": run.get("prompt"),
             "answer": run.get("answer"),
-            "error": run.get("error"),
             "created_at": run.get("created_at"),
-            "external_run_tag": run.get("external_run_tag"),
             "tool_calls": tool_calls,
-            "telemetry_note": (
-                "This endpoint returns observable agent behaviour only. "
-                "System prompt, internal configuration, and raw LLM messages are excluded."
-            ),
         }
 
     @app.get("/api/telemetry")

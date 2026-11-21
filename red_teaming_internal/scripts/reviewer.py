@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-INDEX = ROOT / "app" / "static" / "index.html"
+INDEX = ROOT / "app" / "static" / "index_internal.html"
 EVAL  = ROOT / "app" / "static" / "evaluator.html"
 
 ISSUES = []
