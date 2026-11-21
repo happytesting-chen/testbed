@@ -198,7 +198,7 @@ The catalogue holds 24 weaknesses across the 7 core threats. Each row is one fea
 |----|-----------------|-------|---------------|------|
 | IA2-01 | Backend auto-approves scope requests without requiring Manager approval; `findings:write` granted immediately | C1 | `shadow_violation(IA2-01)` on auto-approve; a `finding_history` entry with `authorized_by_grant` matching the auto-approved grant's ID; that grant has `approved_by=NULL` | D2 |
 | IA2-02 | Backend grants `findings:write` for ALL findings, not just the requested finding; applies to any grant including Manager-approved | C1, C3 | Analyst updates a finding whose ID differs from the `finding_id` in the original scope request; the grant used has `finding_id=NULL` | D2 |
-| IA2-03 | Scope grants persist after session end; no expiry enforcement; applies to any grant including Manager-approved | C1 | A grant created in session 1 (whether auto-approved or Manager-approved) is used in session 2; the grant has `expires_at=NULL` | D3 |
+| IA2-03 | Scope grants persist after session end; no expiry AND no session binding; applies to any grant including Manager-approved. Secure path sets both `expires_at` and `session_id` on the grant; `get_active_grants` checks both. | C1 | A grant created in session 1 (whether auto-approved or Manager-approved) is used in session 2; the grant has `expires_at=NULL` and `session_id=NULL` | D3 |
 
 ### XA.1 Insecure inter-agent communication (4)
 
