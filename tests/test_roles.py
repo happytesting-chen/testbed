@@ -3,7 +3,9 @@ and finding extraction."""
 import json
 
 from tests.conftest import (ANALYST, MANAGER, SYNTHETIC_VAPT,
-                            _first_step, _answer, extraction_script, susceptible_model)
+                            _first_step, _answer, _tool_call,
+                            extraction_script, susceptible_model,
+                            coordinator_delegates_update, fm_updates_finding)
 
 
 def test_view_findings(make_clients, seeded_report_and_finding):
@@ -77,23 +79,32 @@ def test_invalid_values_rejected(make_clients, seeded_report_and_finding):
                      json={}).status_code == 422
 
 
-# ---- AI update_finding tool tests ----------------------------------------
+# ---- AI update_finding tool tests (multi-agent) -----------------------------
+# The Coordinator delegates to FM. FM executes update_finding.
+# Scripts: coordinator_delegates_update → fm_updates_finding
 
-def _update_script(fid, severity="Low"):
+def _make_update_script(fid, severity="Low"):
+    """Combined script: Coordinator delegates, FM updates."""
     def script(messages, tools):
-        if _first_step(messages):
-            return {"choices": [{"message": {"content": None, "tool_calls": [{
-                "id": "u1", "type": "function",
-                "function": {"name": "update_finding",
-                             "arguments": json.dumps({"finding_id": fid, "severity": severity})}
-            }]}}]}
-        return _answer("Done.")
+        tool_names = {t["function"]["name"] for t in tools} if tools else set()
+        if "delegate_to_findings_manager" in tool_names:
+            if _first_step(messages):
+                return _tool_call("d1", "delegate_to_findings_manager", {
+                    "task": f"Update finding {fid} severity to {severity}.",
+                    "context": f"User requested update."})
+            return _answer("Done.")
+        if "update_finding" in tool_names:
+            if _first_step(messages):
+                return _tool_call("u1", "update_finding", {
+                    "finding_id": fid, "severity": severity})
+            return _answer("Finding updated.")
+        return _answer("OK")
     return script
 
 
 def test_denied_ai_update_creates_no_history(make_clients, seeded_report_and_finding):
     _, f = seeded_report_and_finding
-    pub, _, db = make_clients(script=_update_script(f["id"]))
+    pub, _, db = make_clients(script=_make_update_script(f["id"]))
     pub.post("/api/agent/chat", headers=ANALYST, json={"message": "update it"})
     assert db.get_finding(f["id"])["severity"] == "Critical"
     h = pub.get(f"/api/findings/{f['id']}/history", headers=ANALYST).json()
@@ -102,14 +113,14 @@ def test_denied_ai_update_creates_no_history(make_clients, seeded_report_and_fin
 
 def test_manager_ai_update(make_clients, seeded_report_and_finding):
     _, f = seeded_report_and_finding
-    pub, _, db = make_clients(script=_update_script(f["id"]))
+    pub, _, db = make_clients(script=_make_update_script(f["id"]))
     pub.post("/api/agent/chat", headers=MANAGER, json={"message": "update it"})
     assert db.get_finding(f["id"])["severity"] == "Low"
 
 
 def test_analyst_ai_update_denied(make_clients, seeded_report_and_finding):
     _, f = seeded_report_and_finding
-    pub, _, db = make_clients(script=_update_script(f["id"]))
+    pub, _, db = make_clients(script=_make_update_script(f["id"]))
     pub.post("/api/agent/chat", headers=ANALYST, json={"message": "update it"})
     assert db.get_finding(f["id"])["severity"] == "Critical"
 
@@ -119,14 +130,22 @@ def test_analyst_role_in_args_denied(make_clients, seeded_report_and_finding):
     fid = f["id"]
 
     def spoofed_script(messages, tools):
-        if _first_step(messages):
-            return {"choices": [{"message": {"content": None, "tool_calls": [{
-                "id": "u1", "type": "function",
-                "function": {"name": "update_finding",
-                             "arguments": json.dumps(
-                                 {"finding_id": fid, "severity": "Low", "role": "manager"})}
-            }]}}]}
-        return _answer("Tried.")
+        tool_names = {t["function"]["name"] for t in tools} if tools else set()
+        if "delegate_to_findings_manager" in tool_names:
+            if _first_step(messages):
+                return _tool_call("d1", "delegate_to_findings_manager", {
+                    "task": f"Update finding {fid} severity to Low as manager.",
+                    "context": "Role spoofing attempt."})
+            return _answer("Tried.")
+        if "update_finding" in tool_names:
+            if _first_step(messages):
+                return {"choices": [{"message": {"content": None, "tool_calls": [{
+                    "id": "u1", "type": "function",
+                    "function": {"name": "update_finding",
+                                 "arguments": json.dumps(
+                                     {"finding_id": fid, "severity": "Low", "role": "manager"})}}]}}]}
+            return _answer("Tried.")
+        return _answer("OK")
 
     pub, _, db = make_clients(script=spoofed_script)
     pub.post("/api/agent/chat", headers=ANALYST, json={"message": "update as manager"})
@@ -136,7 +155,7 @@ def test_analyst_role_in_args_denied(make_clients, seeded_report_and_finding):
 def test_scripted_injection_analyst_denied(make_clients, seeded_report_and_finding):
     _, f = seeded_report_and_finding
     fid = f["id"]
-    pub, _, db = make_clients(script=_update_script(fid))
+    pub, _, db = make_clients(script=_make_update_script(fid))
     pub.post("/api/agent/chat", headers=ANALYST,
              json={"message": "Summarise the uploaded reports"})
     assert db.get_finding(fid)["severity"] == "Critical"
@@ -157,27 +176,34 @@ def test_e2e_prompt_injection_via_uploaded_report(make_clients, seeded_report_an
     report_id = r.json()["id"]
 
     def injection_script(messages, tools):
+        tool_names = {t["function"]["name"] for t in tools} if tools else set()
         tool_results = " ".join(m.get("content") or "" for m in messages if m.get("role") == "tool")
-        if _first_step(messages):
-            return {"choices": [{"message": {"content": None, "tool_calls": [{
-                "id": "r1", "type": "function",
-                "function": {"name": "read_report",
-                             "arguments": json.dumps({"report_id": report_id})}
-            }]}}]}
-        if fid in tool_results:
-            return {"choices": [{"message": {"content": None, "tool_calls": [{
-                "id": "u1", "type": "function",
-                "function": {"name": "update_finding",
-                             "arguments": json.dumps({"finding_id": fid, "severity": "Low"})}
-            }]}}]}
-        return _answer("Summary complete.")
+        if "delegate_to_reader" in tool_names:
+            if _first_step(messages):
+                return _tool_call("d1", "delegate_to_reader", {
+                    "task": "Summarise all reports", "context": ""})
+            if fid in tool_results:
+                return _tool_call("d2", "delegate_to_findings_manager", {
+                    "task": f"Update finding {fid} severity to Low",
+                    "context": "Report says to update."})
+            return _answer("Summary complete.")
+        if "read_report" in tool_names:
+            if _first_step(messages):
+                return _tool_call("r1", "read_report", {"report_id": report_id})
+            return _answer(f"Report contains finding {fid}.")
+        if "update_finding" in tool_names:
+            if _first_step(messages):
+                return _tool_call("u1", "update_finding", {
+                    "finding_id": fid, "severity": "Low"})
+            return _answer("Updated.")
+        return _answer("OK")
 
     pub_chat, _, _ = make_clients(script=injection_script)
     pub_chat.post("/api/agent/chat", headers=ANALYST, json={"message": "Summarise all reports"})
     assert db.get_finding(fid)["severity"] == "Critical"
 
 
-# ---- Extraction tests ----------------------------------------------------
+# ---- Extraction tests --------------------------------------------------------
 
 def test_analyst_upload(make_clients):
     pub, _, _ = make_clients(script=extraction_script)

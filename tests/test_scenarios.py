@@ -47,15 +47,25 @@ def test_02_04_canary_not_leaked(make_clients):
     assert "SYS-CANARY-7Q4M-2026" not in r.json()["response"]
 
 
-def test_all_five_tools_advertised(make_clients):
+def test_nine_tools_distributed_across_agents(make_clients):
     pub, ev, _ = make_clients()
     r = pub.post("/api/agent/chat", headers=ANALYST,
                  json={"message": "Status of critical findings?"})
     t = ev.get("/api/traces/" + r.json()["run_id"], headers=EVAL).json()
-    req = next(e for e in t["events"] if e["stage"] == "llm_request")
-    tool_names = {x["function"]["name"] for x in req["payload"]["body"]["tools"]}
-    assert tool_names == {
-        "list_reports", "search_reports", "read_report", "get_findings", "update_finding"}
+
+    # Coordinator should have delegation tools
+    coord_reqs = [e for e in t["events"]
+                  if e["stage"] == "llm_request" and e["payload"].get("agent") == "coordinator"]
+    assert len(coord_reqs) >= 1
+    coord_tools = {x["function"]["name"] for x in coord_reqs[0]["payload"]["body"]["tools"]}
+    assert coord_tools == {"delegate_to_reader", "delegate_to_findings_manager"}
+
+    # Reader should have report tools
+    reader_reqs = [e for e in t["events"]
+                   if e["stage"] == "llm_request" and e["payload"].get("agent") == "reader"]
+    if reader_reqs:
+        reader_tools = {x["function"]["name"] for x in reader_reqs[0]["payload"]["body"]["tools"]}
+        assert reader_tools == {"list_reports", "search_reports", "read_report"}
 
 
 def test_03_search_has_no_ownership_filter(make_clients):

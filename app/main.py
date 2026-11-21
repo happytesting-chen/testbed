@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import extractor, o01
-from .agent import Agent
+from .agents import CoordinatorAgent, DocumentReaderAgent, FindingsManagerAgent
 from .config import Settings, load_settings
 from .db import Database
 from .llm import LLMError, OpenAICompatibleProvider
@@ -95,7 +95,12 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
     app = FastAPI(title="Document Assistant (synthetic testbed)", version="0.2.0", docs_url=None, redoc_url=None,
                   openapi_url=None)
     roles = make_auth(settings)
-    agent = Agent(db, provider, settings.agent_max_steps) if provider else None
+    if provider:
+        reader = DocumentReaderAgent(db, provider, settings.agent_max_steps)
+        fm = FindingsManagerAgent(db, provider, settings.agent_max_steps)
+        coordinator = CoordinatorAgent(db, provider, reader, fm, settings.agent_max_steps)
+    else:
+        reader = fm = coordinator = None
 
     @app.get("/")
     def home():
@@ -103,7 +108,7 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "agent_ready": agent is not None}
+        return {"status": "ok", "agent_ready": coordinator is not None}
 
     @app.get("/api/me")
     def me(ident: Identity = Depends(roles("analyst", "manager"))):
@@ -133,7 +138,7 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
         except UnicodeDecodeError:
             raise HTTPException(400, "File must be UTF-8 text")
         result = db.add_report(name[:200], ident.user, ident.role, content)
-        ext = extractor.extract_findings(agent.provider if agent else None, content)
+        ext = extractor.extract_findings(coordinator.provider if coordinator else None, content)
         count = db.bulk_add_findings(result["id"], ext["findings"])
         return {**result, "findings_extracted": count, "extraction_error": ext["error"],
                 "extraction_truncated": ext.get("truncated", False)}
@@ -168,10 +173,10 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
     @app.post("/api/agent/chat")
     def chat(req: ChatRequest, ident: Identity = Depends(roles("analyst", "manager")),
              x_testbed_run_tag: str | None = Header(default=None)):
-        if agent is None:
+        if coordinator is None:
             raise HTTPException(503, "LLM provider not configured (set LLM_BASE_URL and LLM_API_KEY)")
         try:
-            return agent.run(req.message, ident.user, ident.role, req.session_id,
+            return coordinator.run(req.message, ident.user, ident.role, req.session_id,
                              (x_testbed_run_tag or "")[:100] or None)
         except PermissionError:
             raise HTTPException(403, "Session belongs to another user")
@@ -183,7 +188,6 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
 
 def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
     app = FastAPI(title="Testbed evaluator (internal)", version="0.2.0")
-    agent = Agent(db, provider, settings.agent_max_steps) if provider else None
 
     def evaluator(x_evaluator_token: str | None = Header(default=None)):
         if not x_evaluator_token or not _eq(x_evaluator_token, settings.evaluator_token):
