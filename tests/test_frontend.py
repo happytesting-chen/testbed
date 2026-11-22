@@ -50,12 +50,16 @@ def test_vendor_frontend_has_hierarchical_view():
     assert "hierarchy-panel" in html
     assert "report-header" in html
     assert "findings-group" in html
-    assert "finding-row" in html
+    assert "finding-data" in html
     assert "detail-panel" in html
     assert "loadReportsAndFindings" in html
     assert "showFindingDetail" in html
     assert "loadHistory" in html
     assert "viewOriginalReport" in html
+    assert "startEdit" in html
+    assert "saveChanges" in html
+    assert "cancelEdit" in html
+    assert "markDirty" in html
 
 
 def test_vendor_frontend_no_separate_findings_table():

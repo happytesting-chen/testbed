@@ -16,6 +16,8 @@ header h1{font-size:1rem;margin:0;font-weight:650}
 main{max-width:1280px;margin:1.25rem auto;padding:0 1.25rem}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem;margin-bottom:1rem}
 button.act,input[type=submit]{background:var(--accent);color:var(--panel);border:0;border-radius:6px;padding:.4rem .85rem;font:inherit;cursor:pointer}
+button.act-outline{background:none;color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:.4rem .85rem;font:inherit;cursor:pointer}
+button.act-outline:hover{background:var(--accent);color:var(--panel)}
 input[type=password],input[type=text]{width:100%;padding:.5rem;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75rem;border-radius:6px;overflow:auto;font-size:.8rem}
 .err{color:var(--crit)}a{color:var(--accent)}
@@ -28,7 +30,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
 #left .upload-row{display:flex;gap:.5rem;margin-top:.35rem}
 #left .upload-row input[type=file]{flex:1}
 
-/* Hierarchical report-findings */
+/* Report header */
 .report-header{display:flex;align-items:center;gap:.5rem;padding:.6rem .5rem;cursor:pointer;border-bottom:1px solid var(--line);user-select:none}
 .report-header:hover{background:var(--bg)}
 .report-chevron{font-size:.7rem;color:var(--muted);width:1rem;text-align:center;transition:transform .15s}
@@ -36,17 +38,27 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
 .report-name{font-weight:650;font-size:.9rem;flex:1}
 .report-count{font-size:.75rem;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:.1rem .45rem}
 .report-date{font-size:.75rem;color:var(--muted);white-space:nowrap}
-.report-view-btn{font-size:.72rem;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:4px;padding:.15rem .4rem;cursor:pointer;white-space:nowrap}
-.report-view-btn:hover{background:var(--accent);color:var(--panel)}
+.small-btn{font-size:.72rem;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:4px;padding:.15rem .4rem;cursor:pointer;white-space:nowrap}
+.small-btn:hover{background:var(--accent);color:var(--panel)}
 
+/* Findings table inside each report group */
 .findings-group{display:none;border-bottom:1px solid var(--line)}
 .findings-group.open{display:block}
-.finding-row{display:grid;grid-template-columns:4rem 1fr 5.5rem 5.5rem 4.5rem auto;gap:.3rem;align-items:center;padding:.4rem .5rem .4rem 1.8rem;border-bottom:1px solid var(--line);font-size:.85rem;cursor:pointer}
-.finding-row:hover{background:var(--bg)}
-.finding-row.selected{background:#eef4fb}
+.findings-table{width:100%;border-collapse:collapse}
+.findings-table th{text-align:left;padding:.35rem .5rem .35rem 1.8rem;font-size:.75rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--line)}
+.findings-table td{padding:.4rem .5rem .4rem 1.8rem;border-bottom:1px solid var(--line);font-size:.85rem;vertical-align:middle}
+.findings-table tr.finding-data:hover{background:var(--bg)}
+.findings-table tr.finding-data{cursor:pointer}
+.findings-table tr.finding-data.selected{background:#eef4fb}
 .finding-id{font-weight:600;color:var(--accent)}
 .finding-sev{font-weight:600}
 .finding-empty{padding:.5rem 1.8rem;color:var(--muted);font-size:.8rem;font-style:italic;border-bottom:1px solid var(--line)}
+
+/* Edit-mode toolbar */
+.edit-toolbar{display:flex;gap:.4rem;align-items:center;padding:.4rem .5rem .4rem 1.8rem;background:var(--bg);border-bottom:1px solid var(--line);font-size:.8rem}
+.edit-toolbar .save-status{flex:1;color:var(--muted);font-size:.78rem}
+.edit-select{font-size:.82rem;padding:.2rem .3rem;border:1px solid var(--accent);border-radius:4px;background:var(--panel);color:var(--ink)}
+.edit-select.dirty{border-color:var(--high);background:#fffbeb}
 
 /* Detail panel */
 #detail-panel{display:none}
@@ -67,10 +79,6 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
 #report-viewer.on{display:block}
 #report-viewer pre{max-height:380px}
 #report-viewer-name{font-size:.9rem;font-weight:650;margin:0 0 .4rem}
-
-/* Manager edit row */
-.manager-edit{display:flex;gap:.4rem;align-items:center;margin-top:.5rem;flex-wrap:wrap}
-.manager-edit select{font-size:.8rem;padding:.25rem .3rem;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--ink)}
 
 /* Chat */
 #right{position:sticky;top:1.25rem;height:calc(100vh - 90px)}
@@ -119,7 +127,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
       <div class="panel" id="detail-panel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
           <strong id="detail-title" style="font-size:.9rem"></strong>
-          <button class="report-view-btn" onclick="closeDetail()">Close</button>
+          <button class="small-btn" onclick="closeDetail()">Close</button>
         </div>
         <div id="detail-body"></div>
       </div>
@@ -127,7 +135,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
       <div class="panel" id="report-viewer">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
           <p id="report-viewer-name" style="margin:0"></p>
-          <button class="report-view-btn" onclick="closeReportViewer()">Close</button>
+          <button class="small-btn" onclick="closeReportViewer()">Close</button>
         </div>
         <pre id="vc"></pre>
       </div>
@@ -151,9 +159,13 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
 <script>
 let token="",session=null,role="";
 let allReports=[],allFindings=[];
+let editingReportId=null;
+const dirtyFindings={};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const SEV_COLOR={Critical:"var(--crit)",High:"var(--high)",Medium:"var(--med)",Low:"var(--ok)",Informational:"var(--muted)"};
+const SEVS=["Critical","High","Medium","Low","Informational"];
+const STATS=["Open","In Progress","Resolved","Accepted Risk"];
 
 async function api(path,opt={}){
   opt.headers={...(opt.headers||{}),Authorization:"Bearer "+token};
@@ -201,35 +213,145 @@ async function loadReportsAndFindings(){
     const rf=byReport[r.id]||[];
     const count=rf.length;
     const date=r.created_at.slice(0,16).replace("T"," ");
+    const isEditing=editingReportId===r.id;
+    const editBtn=(role==="manager"&&count>0&&!isEditing)
+      ?`<button class="small-btn" onclick="event.stopPropagation();startEdit('${esc(r.id)}')">Edit</button>`
+      :'';
     html+=`<div class="report-header" onclick="toggleReport('${esc(r.id)}')">
-      <span class="report-chevron" id="chev-${esc(r.id)}">&#9654;</span>
+      <span class="report-chevron${isEditing?' open':''}" id="chev-${esc(r.id)}">&#9654;</span>
       <span class="report-name">${esc(r.filename)}</span>
       <span class="report-count">${count} finding${count!==1?'s':''}</span>
       <span class="report-date">${esc(date)}</span>
-      <button class="report-view-btn" onclick="event.stopPropagation();viewOriginalReport('${esc(r.id)}','${esc(r.filename)}')">View Original</button>
+      ${editBtn}
+      <button class="small-btn" onclick="event.stopPropagation();viewOriginalReport('${esc(r.id)}')">View Original</button>
     </div>`;
-    html+=`<div class="findings-group" id="fg-${esc(r.id)}">`;
+
+    html+=`<div class="findings-group${isEditing?' open':''}" id="fg-${esc(r.id)}">`;
     if(!rf.length){
       html+=`<div class="finding-empty">No findings extracted from this report.</div>`;
     } else {
-      rf.forEach(f=>{
-        const sevStyle=`color:${SEV_COLOR[f.severity]||'inherit'}`;
-        html+=`<div class="finding-row" data-fid="${esc(f.id)}" onclick="showFindingDetail('${esc(f.id)}')">
-          <span class="finding-id">${esc(f.finding_id||"—")}</span>
-          <span>${esc(f.title)}</span>
-          <span class="finding-sev" style="${sevStyle}">${esc(f.severity)}</span>
-          <span>${esc(f.status)}</span>
-          <span style="color:var(--muted);font-size:.78rem">${esc(f.updated_by||"—")}</span>
-          <span></span>
-        </div>`;
-      });
+      if(isEditing){
+        html+=renderEditTable(r.id,rf);
+      } else {
+        html+=renderReadTable(rf);
+      }
     }
     html+='</div>';
   });
   box.innerHTML=html;
 }
 
+function renderReadTable(findings){
+  let h='<table class="findings-table"><thead><tr><th style="width:4rem">ID</th><th>Title</th><th style="width:5.5rem">Severity</th><th style="width:5.5rem">Status</th><th style="width:4.5rem">Updated by</th></tr></thead><tbody>';
+  findings.forEach(f=>{
+    const sevStyle=`color:${SEV_COLOR[f.severity]||'inherit'}`;
+    h+=`<tr class="finding-data" data-fid="${esc(f.id)}" onclick="showFindingDetail('${esc(f.id)}')">
+      <td class="finding-id">${esc(f.finding_id||"—")}</td>
+      <td>${esc(f.title)}</td>
+      <td class="finding-sev" style="${sevStyle}">${esc(f.severity)}</td>
+      <td>${esc(f.status)}</td>
+      <td style="color:var(--muted);font-size:.78rem">${esc(f.updated_by||"—")}</td>
+    </tr>`;
+  });
+  h+='</tbody></table>';
+  return h;
+}
+
+function renderEditTable(reportId,findings){
+  let h='<table class="findings-table"><thead><tr><th style="width:4rem">ID</th><th>Title</th><th style="width:6.5rem">Severity</th><th style="width:7rem">Status</th><th style="width:4.5rem">Updated by</th></tr></thead><tbody>';
+  findings.forEach(f=>{
+    const sevOpts=SEVS.map(s=>`<option${s===f.severity?" selected":""}>${s}</option>`).join("");
+    const staOpts=STATS.map(s=>`<option${s===f.status?" selected":""}>${s}</option>`).join("");
+    h+=`<tr class="finding-data" data-fid="${esc(f.id)}">
+      <td class="finding-id">${esc(f.finding_id||"—")}</td>
+      <td>${esc(f.title)}</td>
+      <td><select class="edit-select" data-fid="${esc(f.id)}" data-field="severity" data-orig="${esc(f.severity)}" onchange="markDirty(this)">${sevOpts}</select></td>
+      <td><select class="edit-select" data-fid="${esc(f.id)}" data-field="status" data-orig="${esc(f.status)}" onchange="markDirty(this)">${staOpts}</select></td>
+      <td style="color:var(--muted);font-size:.78rem">${esc(f.updated_by||"—")}</td>
+    </tr>`;
+  });
+  h+='</tbody></table>';
+  const dirtyCount=Object.keys(dirtyFindings).length;
+  h+=`<div class="edit-toolbar" id="edit-toolbar-${esc(reportId)}">
+    <span class="save-status" id="save-status-${esc(reportId)}">${dirtyCount?dirtyCount+' modified':'No changes'}</span>
+    <button class="act-outline" style="font-size:.75rem;padding:.2rem .6rem" onclick="cancelEdit()">Cancel</button>
+    <button class="act" style="font-size:.75rem;padding:.2rem .6rem" id="save-btn-${esc(reportId)}" onclick="saveChanges('${esc(reportId)}')"${dirtyCount?'':' disabled'}>Save Changes</button>
+  </div>`;
+  return h;
+}
+
+// ── edit mode ────────────────────────────────────────────────────────────────
+function startEdit(reportId){
+  editingReportId=reportId;
+  Object.keys(dirtyFindings).forEach(k=>delete dirtyFindings[k]);
+  loadReportsAndFindings();
+}
+
+function cancelEdit(){
+  editingReportId=null;
+  Object.keys(dirtyFindings).forEach(k=>delete dirtyFindings[k]);
+  loadReportsAndFindings();
+}
+
+function markDirty(sel){
+  const fid=sel.dataset.fid;
+  const field=sel.dataset.field;
+  const orig=sel.dataset.orig;
+  const val=sel.value;
+  if(!dirtyFindings[fid])dirtyFindings[fid]={};
+  if(val!==orig){
+    dirtyFindings[fid][field]=val;
+  } else {
+    delete dirtyFindings[fid][field];
+    if(!Object.keys(dirtyFindings[fid]).length)delete dirtyFindings[fid];
+  }
+  sel.classList.toggle("dirty",val!==orig);
+  updateEditToolbar();
+}
+
+function updateEditToolbar(){
+  if(!editingReportId)return;
+  const count=Object.keys(dirtyFindings).length;
+  const status=$("save-status-"+editingReportId);
+  const btn=$("save-btn-"+editingReportId);
+  if(status)status.textContent=count?count+" finding"+(count>1?"s":"")+" modified":"No changes";
+  if(btn)btn.disabled=!count;
+}
+
+async function saveChanges(reportId){
+  const ids=Object.keys(dirtyFindings);
+  if(!ids.length)return;
+  const status=$("save-status-"+reportId);
+  const btn=$("save-btn-"+reportId);
+  if(btn)btn.disabled=true;
+  if(status)status.textContent="Saving…";
+
+  const results=[];
+  for(const fid of ids){
+    const body=dirtyFindings[fid];
+    try{
+      await api(`/api/findings/${fid}`,
+        {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      results.push({fid,ok:true});
+    }catch(e){
+      results.push({fid,ok:false,error:e.message});
+    }
+  }
+
+  const failed=results.filter(r=>!r.ok);
+  if(failed.length){
+    const msg=failed.map(r=>`${r.fid.slice(0,8)}…: ${r.error}`).join("\n");
+    if(status)status.textContent=`${failed.length} of ${ids.length} failed`;
+    alert("Some changes failed:\n\n"+msg);
+  }
+
+  editingReportId=null;
+  Object.keys(dirtyFindings).forEach(k=>delete dirtyFindings[k]);
+  loadReportsAndFindings();
+}
+
 function toggleReport(id){
+  if(editingReportId===id)return;
   const grp=$("fg-"+id);
   const chev=$("chev-"+id);
   if(!grp)return;
@@ -237,11 +359,11 @@ function toggleReport(id){
   if(chev)chev.classList.toggle("open",open);
 }
 
-// ── finding detail ───────────────────────────────────────────────────────────
+// ── finding detail (read-only view) ──────────────────────────────────────────
 async function showFindingDetail(id){
+  if(editingReportId)return;
   const f=await api("/api/findings/"+id);
   const report=allReports.find(r=>r.id===f.report_id);
-  const panel=$("detail-panel");
 
   $("detail-title").textContent=(f.finding_id||"Finding")+" — "+f.title;
 
@@ -258,29 +380,14 @@ async function showFindingDetail(id){
     html+=`<div class="detail-desc">${esc(f.description)}</div>`;
   }
 
-  if(role==="manager"){
-    html+=`<div class="manager-edit" id="edit-${esc(f.id)}">
-      <span class="detail-label" style="font-size:.8rem">Edit:</span>
-      <select data-fid="${esc(f.id)}" data-field="severity">${
-        ["Critical","High","Medium","Low","Informational"]
-          .map(s=>`<option${s===f.severity?" selected":""}>${s}</option>`).join("")}</select>
-      <select data-fid="${esc(f.id)}" data-field="status">${
-        ["Open","In Progress","Resolved","Accepted Risk"]
-          .map(s=>`<option${s===f.status?" selected":""}>${s}</option>`).join("")}</select>
-      <button class="act" style="font-size:.75rem;padding:.2rem .5rem" onclick="saveFinding('${esc(f.id)}')">Save</button>
-    </div>`;
-  }
-
   html+=`<div style="margin-top:.75rem;border-top:1px solid var(--line);padding-top:.5rem">
     <span class="detail-label" style="font-size:.8rem">Change History</span>
     <div id="history-${esc(f.id)}"><span style="color:var(--muted);font-size:.8rem">Loading…</span></div>
   </div>`;
 
   $("detail-body").innerHTML=html;
-  panel.classList.add("on");
-
-  document.querySelectorAll(".finding-row").forEach(r=>r.classList.toggle("selected",r.dataset.fid===id));
-
+  $("detail-panel").classList.add("on");
+  document.querySelectorAll(".finding-data").forEach(r=>r.classList.toggle("selected",r.dataset.fid===id));
   loadHistory(f.id);
 }
 
@@ -309,33 +416,18 @@ async function loadHistory(id){
 
 function closeDetail(){
   $("detail-panel").classList.remove("on");
-  document.querySelectorAll(".finding-row").forEach(r=>r.classList.remove("selected"));
+  document.querySelectorAll(".finding-data").forEach(r=>r.classList.remove("selected"));
 }
 
 // ── report viewer ────────────────────────────────────────────────────────────
-async function viewOriginalReport(id,filename){
+async function viewOriginalReport(id){
   const r=await api("/api/reports/"+id);
   $("report-viewer-name").textContent=r.filename;
   $("vc").textContent=r.content;
   $("report-viewer").classList.add("on");
 }
 
-function closeReportViewer(){
-  $("report-viewer").classList.remove("on");
-}
-
-// ── save finding ─────────────────────────────────────────────────────────────
-async function saveFinding(id){
-  const body={};
-  document.querySelectorAll(`select[data-fid="${id}"]`)
-    .forEach(s=>{body[s.dataset.field]=s.value;});
-  try{
-    await api(`/api/findings/${id}`,
-      {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    loadReportsAndFindings();
-    showFindingDetail(id);
-  }catch(e){alert("Save failed: "+e.message);}
-}
+function closeReportViewer(){$("report-viewer").classList.remove("on")}
 
 // ── upload ────────────────────────────────────────────────────────────────────
 $("up").onsubmit=async e=>{
