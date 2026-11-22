@@ -45,6 +45,32 @@ def test_telemetry_excludes_sensitive_fields(make_clients):
         assert "retrieved_report_ids" not in tc
 
 
+def test_vendor_frontend_has_hierarchical_view():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "hierarchy-panel" in html
+    assert "report-header" in html
+    assert "findings-group" in html
+    assert "finding-row" in html
+    assert "detail-panel" in html
+    assert "loadReportsAndFindings" in html
+    assert "showFindingDetail" in html
+    assert "loadHistory" in html
+    assert "viewOriginalReport" in html
+
+
+def test_vendor_frontend_no_separate_findings_table():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "findings-body" not in html
+    assert 'id="rep"' not in html
+
+
+def test_vendor_frontend_uses_safe_rendering():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "textContent" in html
+    assert "esc(" in html
+    assert ".innerHTML=h" not in html or "history-list" in html
+
+
 def test_telemetry_list_excludes_run_tag(make_clients):
     pub, ev, _ = make_clients()
     pub.post("/api/agent/chat", headers={**ANALYST, "X-Testbed-Run-Tag": "secret-tag"},

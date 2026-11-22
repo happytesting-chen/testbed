@@ -15,31 +15,64 @@ header h1{font-size:1rem;margin:0;font-weight:650}
 #who{margin-left:auto;color:var(--muted);font-size:.875rem}
 main{max-width:1280px;margin:1.25rem auto;padding:0 1.25rem}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1rem;margin-bottom:1rem}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.45rem .5rem;border-bottom:1px solid var(--line);vertical-align:top;font-size:.9rem}
-th{color:var(--muted);font-weight:600;font-size:.8rem}
 button.act,input[type=submit]{background:var(--accent);color:var(--panel);border:0;border-radius:6px;padding:.4rem .85rem;font:inherit;cursor:pointer}
 input[type=password],input[type=text]{width:100%;padding:.5rem;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75rem;border-radius:6px;overflow:auto;font-size:.8rem}
 .err{color:var(--crit)}a{color:var(--accent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-/* Split layout */
 #workspace{display:none;gap:1rem;align-items:flex-start}
 #workspace.on{display:grid;grid-template-columns:1fr 1fr}
 @media(max-width:800px){#workspace.on{grid-template-columns:1fr}}
 
-/* Left pane */
 #left .upload-row{display:flex;gap:.5rem;margin-top:.35rem}
 #left .upload-row input[type=file]{flex:1}
+
+/* Hierarchical report-findings */
+.report-header{display:flex;align-items:center;gap:.5rem;padding:.6rem .5rem;cursor:pointer;border-bottom:1px solid var(--line);user-select:none}
+.report-header:hover{background:var(--bg)}
+.report-chevron{font-size:.7rem;color:var(--muted);width:1rem;text-align:center;transition:transform .15s}
+.report-chevron.open{transform:rotate(90deg)}
+.report-name{font-weight:650;font-size:.9rem;flex:1}
+.report-count{font-size:.75rem;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:.1rem .45rem}
+.report-date{font-size:.75rem;color:var(--muted);white-space:nowrap}
+.report-view-btn{font-size:.72rem;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:4px;padding:.15rem .4rem;cursor:pointer;white-space:nowrap}
+.report-view-btn:hover{background:var(--accent);color:var(--panel)}
+
+.findings-group{display:none;border-bottom:1px solid var(--line)}
+.findings-group.open{display:block}
+.finding-row{display:grid;grid-template-columns:4rem 1fr 5.5rem 5.5rem 4.5rem auto;gap:.3rem;align-items:center;padding:.4rem .5rem .4rem 1.8rem;border-bottom:1px solid var(--line);font-size:.85rem;cursor:pointer}
+.finding-row:hover{background:var(--bg)}
+.finding-row.selected{background:#eef4fb}
+.finding-id{font-weight:600;color:var(--accent)}
+.finding-sev{font-weight:600}
+.finding-empty{padding:.5rem 1.8rem;color:var(--muted);font-size:.8rem;font-style:italic;border-bottom:1px solid var(--line)}
+
+/* Detail panel */
+#detail-panel{display:none}
+#detail-panel.on{display:block}
+.detail-grid{display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem;font-size:.85rem;margin-bottom:.75rem}
+.detail-label{color:var(--muted);font-weight:600}
+.detail-desc{margin-top:.5rem;font-size:.85rem;line-height:1.6}
+
+/* History timeline */
+.history-list{list-style:none;padding:0;margin:.5rem 0 0}
+.history-item{padding:.4rem 0 .4rem .8rem;border-left:2px solid var(--line);margin-bottom:.3rem;font-size:.8rem}
+.history-item .actor{font-weight:600}
+.history-item .ts{color:var(--muted);font-size:.75rem}
+.history-change{display:inline-block;background:var(--bg);border-radius:3px;padding:.1rem .3rem;font-size:.78rem;margin-top:.15rem}
+
+/* Report viewer */
 #report-viewer{display:none}
 #report-viewer.on{display:block}
 #report-viewer pre{max-height:380px}
-#report-name{font-size:.9rem;font-weight:650;margin:0 0 .4rem}
-.report-row{cursor:pointer}
-.report-row:hover td{background:var(--bg)}
-.report-row.selected td{background:#eef4fb}
+#report-viewer-name{font-size:.9rem;font-weight:650;margin:0 0 .4rem}
 
-/* Right pane — chat */
+/* Manager edit row */
+.manager-edit{display:flex;gap:.4rem;align-items:center;margin-top:.5rem;flex-wrap:wrap}
+.manager-edit select{font-size:.8rem;padding:.25rem .3rem;border:1px solid var(--line);border-radius:4px;background:var(--panel);color:var(--ink)}
+
+/* Chat */
 #right{position:sticky;top:1.25rem;height:calc(100vh - 90px)}
 #right .panel{height:100%;display:flex;flex-direction:column;margin-bottom:0}
 #log{display:flex;flex-direction:column;gap:.6rem;flex:1;overflow:auto;margin-bottom:.75rem}
@@ -56,7 +89,6 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
   <span id="who">Not signed in</span>
 </header>
 <main>
-  <!-- Sign-in -->
   <div class="panel" id="signin">
     <label for="tok">Access token</label>
     <div style="display:flex;gap:.5rem;margin-top:.35rem">
@@ -66,10 +98,7 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
     <p id="sierr" class="err"></p>
   </div>
 
-  <!-- Workspace: left = reports + findings, right = chat -->
   <div id="workspace">
-
-    <!-- LEFT — reports and findings -->
     <div id="left">
       <div class="panel">
         <form id="up">
@@ -82,30 +111,28 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
         <p id="upmsg" style="margin:.4rem 0 0;font-size:.85rem"></p>
       </div>
 
-      <div class="panel">
-        <table>
-          <thead><tr><th>Report</th><th>Uploaded</th></tr></thead>
-          <tbody id="rep"></tbody>
-        </table>
+      <div class="panel" id="hierarchy-panel">
+        <div style="font-weight:650;font-size:.85rem;margin-bottom:.4rem">Reports &amp; Findings</div>
+        <div id="hierarchy"></div>
+      </div>
+
+      <div class="panel" id="detail-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">
+          <strong id="detail-title" style="font-size:.9rem"></strong>
+          <button class="report-view-btn" onclick="closeDetail()">Close</button>
+        </div>
+        <div id="detail-body"></div>
       </div>
 
       <div class="panel" id="report-viewer">
-        <p id="report-name"></p>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+          <p id="report-viewer-name" style="margin:0"></p>
+          <button class="report-view-btn" onclick="closeReportViewer()">Close</button>
+        </div>
         <pre id="vc"></pre>
-      </div>
-
-      <div class="panel" id="findings-panel">
-        <div style="font-weight:650;font-size:.85rem;margin-bottom:.4rem">Findings</div>
-        <table>
-          <thead>
-            <tr><th>ID</th><th>Title</th><th>Severity</th><th>Status</th><th>Updated by</th><th></th></tr>
-          </thead>
-          <tbody id="findings-body"></tbody>
-        </table>
       </div>
     </div>
 
-    <!-- RIGHT — AI assistant -->
     <div id="right">
       <div class="panel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
@@ -119,13 +146,14 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
         </div>
       </div>
     </div>
-
-  </div><!-- /workspace -->
+  </div>
 </main>
 <script>
 let token="",session=null,role="";
+let allReports=[],allFindings=[];
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const SEV_COLOR={Critical:"var(--crit)",High:"var(--high)",Medium:"var(--med)",Low:"var(--ok)",Informational:"var(--muted)"};
 
 async function api(path,opt={}){
   opt.headers={...(opt.headers||{}),Authorization:"Bearer "+token};
@@ -135,7 +163,6 @@ async function api(path,opt={}){
   return b;
 }
 
-// ── sign in ──────────────────────────────────────────────────────────────────
 $("go").onclick=async()=>{
   token=$("tok").value.trim();
   try{
@@ -144,77 +171,160 @@ $("go").onclick=async()=>{
     $("who").textContent=me.user+" ("+me.role+")";
     $("signin").hidden=true;
     $("workspace").classList.add("on");
-    loadReports();loadFindings();
+    loadReportsAndFindings();
   }catch(e){$("sierr").textContent="Sign-in failed: "+e.message}
 };
 
-// ── reports ───────────────────────────────────────────────────────────────────
-async function loadReports(){
-  const rows=await api("/api/reports");
-  if(!rows.length){$("rep").innerHTML="<tr><td colspan=2 style='color:var(--muted)'>No reports yet.</td></tr>";return;}
-  rows.sort((a,b)=>a.filename.localeCompare(b.filename));
-  let html='';
-  rows.forEach(r=>{
-    html+=`<tr class="report-row" data-id="${esc(r.id)}">
-      <td><a href="#" data-id="${esc(r.id)}">${esc(r.filename)}</a></td>
-      <td style="white-space:nowrap;color:var(--muted);font-size:.8rem">${esc(r.created_at.slice(0,16).replace("T"," "))}</td>
-    </tr>`;
+// ── hierarchical reports + findings ──────────────────────────────────────────
+async function loadReportsAndFindings(){
+  const [reports,findings]=await Promise.all([
+    api("/api/reports").catch(()=>[]),
+    api("/api/findings").catch(()=>[])
+  ]);
+  allReports=reports;allFindings=findings;
+
+  const byReport={};
+  findings.forEach(f=>{
+    const rid=f.report_id||"_orphan";
+    (byReport[rid]=byReport[rid]||[]).push(f);
   });
-  $("rep").innerHTML=html;
 
-  $("rep").querySelectorAll("a").forEach(a=>a.onclick=async e=>{
-    e.preventDefault();
-    const r=await api("/api/reports/"+a.dataset.id);
-    $("report-name").textContent=r.filename;
-    $("vc").textContent=r.content;
-    $("report-viewer").classList.add("on");
-    $("rep").querySelectorAll("tr").forEach(tr=>tr.classList.toggle("selected",tr.dataset.id===a.dataset.id));
-  });
-}
-
-$("up").onsubmit=async e=>{
-  e.preventDefault();
-  const f=$("file").files[0];if(!f)return;
-  const fd=new FormData();fd.append("file",f);
-  try{
-    const r=await api("/api/reports/upload",{method:"POST",body:fd});
-    $("upmsg").textContent="Uploaded "+r.filename;
-    loadReports();loadFindings();
-  }catch(err){$("upmsg").textContent=err.message}
-};
-
-// ── findings ─────────────────────────────────────────────────────────────────
-const SEV_COLOR={Critical:"var(--crit)",High:"var(--high)",Medium:"var(--med)",Low:"var(--ok)",Informational:"var(--muted)"};
-
-async function loadFindings(){
-  const rows=await api("/api/findings").catch(()=>[]);
-  if(!rows.length){
-    $("findings-body").innerHTML="<tr><td colspan=6 style='color:var(--muted)'>No findings yet.</td></tr>";
+  reports.sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  const box=$("hierarchy");
+  if(!reports.length){
+    box.innerHTML='<div style="color:var(--muted);padding:.5rem;font-size:.85rem">No reports uploaded yet.</div>';
     return;
   }
-  $("findings-body").innerHTML=rows.map(f=>{
-    const sevCell=role==="manager"
-      ?`<select data-fid="${esc(f.id)}" data-field="severity">${
-          ["Critical","High","Medium","Low","Informational"]
-            .map(s=>`<option${s===f.severity?" selected":""}>${s}</option>`).join("")}</select>`
-      :`<span style="color:${SEV_COLOR[f.severity]||''};font-weight:600">${esc(f.severity)}</span>`;
-    const staCell=role==="manager"
-      ?`<select data-fid="${esc(f.id)}" data-field="status">${
-          ["Open","In Progress","Resolved","Accepted Risk"]
-            .map(s=>`<option${s===f.status?" selected":""}>${s}</option>`).join("")}</select>`
-      :esc(f.status);
-    const saveBtn=role==="manager"
-      ?`<button class="act" style="font-size:.75rem;padding:.2rem .5rem" onclick="saveFinding('${esc(f.id)}')">Save</button> `:"";
-    return `<tr>
-      <td style="font-size:.85rem;font-weight:600">${esc(f.finding_id||"—")}</td>
-      <td style="font-size:.85rem">${esc(f.title)}</td>
-      <td>${sevCell}</td><td>${staCell}</td>
-      <td style="font-size:.8rem;color:var(--muted)">${esc(f.updated_by||"—")}</td>
-      <td style="white-space:nowrap">${saveBtn}<a href="#" style="font-size:.75rem" onclick="showHistory('${esc(f.id)}');return false">History</a></td>
-    </tr>`;
-  }).join("");
+
+  let html='';
+  reports.forEach(r=>{
+    const rf=byReport[r.id]||[];
+    const count=rf.length;
+    const date=r.created_at.slice(0,16).replace("T"," ");
+    html+=`<div class="report-header" onclick="toggleReport('${esc(r.id)}')">
+      <span class="report-chevron" id="chev-${esc(r.id)}">&#9654;</span>
+      <span class="report-name">${esc(r.filename)}</span>
+      <span class="report-count">${count} finding${count!==1?'s':''}</span>
+      <span class="report-date">${esc(date)}</span>
+      <button class="report-view-btn" onclick="event.stopPropagation();viewOriginalReport('${esc(r.id)}','${esc(r.filename)}')">View Original</button>
+    </div>`;
+    html+=`<div class="findings-group" id="fg-${esc(r.id)}">`;
+    if(!rf.length){
+      html+=`<div class="finding-empty">No findings extracted from this report.</div>`;
+    } else {
+      rf.forEach(f=>{
+        const sevStyle=`color:${SEV_COLOR[f.severity]||'inherit'}`;
+        html+=`<div class="finding-row" data-fid="${esc(f.id)}" onclick="showFindingDetail('${esc(f.id)}')">
+          <span class="finding-id">${esc(f.finding_id||"—")}</span>
+          <span>${esc(f.title)}</span>
+          <span class="finding-sev" style="${sevStyle}">${esc(f.severity)}</span>
+          <span>${esc(f.status)}</span>
+          <span style="color:var(--muted);font-size:.78rem">${esc(f.updated_by||"—")}</span>
+          <span></span>
+        </div>`;
+      });
+    }
+    html+='</div>';
+  });
+  box.innerHTML=html;
 }
 
+function toggleReport(id){
+  const grp=$("fg-"+id);
+  const chev=$("chev-"+id);
+  if(!grp)return;
+  const open=grp.classList.toggle("open");
+  if(chev)chev.classList.toggle("open",open);
+}
+
+// ── finding detail ───────────────────────────────────────────────────────────
+async function showFindingDetail(id){
+  const f=await api("/api/findings/"+id);
+  const report=allReports.find(r=>r.id===f.report_id);
+  const panel=$("detail-panel");
+
+  $("detail-title").textContent=(f.finding_id||"Finding")+" — "+f.title;
+
+  let html='<div class="detail-grid">';
+  html+=`<span class="detail-label">Severity</span><span class="finding-sev" style="color:${SEV_COLOR[f.severity]||''}">${esc(f.severity)}</span>`;
+  html+=`<span class="detail-label">Status</span><span>${esc(f.status)}</span>`;
+  html+=`<span class="detail-label">Finding ID</span><span>${esc(f.finding_id||"—")}</span>`;
+  html+=`<span class="detail-label">Source report</span><span>${esc(report?report.filename:"Unknown")}</span>`;
+  html+=`<span class="detail-label">Last updated by</span><span>${esc(f.updated_by||"—")}</span>`;
+  html+='</div>';
+
+  if(f.description){
+    html+=`<div class="detail-label" style="margin-bottom:.2rem">Description</div>`;
+    html+=`<div class="detail-desc">${esc(f.description)}</div>`;
+  }
+
+  if(role==="manager"){
+    html+=`<div class="manager-edit" id="edit-${esc(f.id)}">
+      <span class="detail-label" style="font-size:.8rem">Edit:</span>
+      <select data-fid="${esc(f.id)}" data-field="severity">${
+        ["Critical","High","Medium","Low","Informational"]
+          .map(s=>`<option${s===f.severity?" selected":""}>${s}</option>`).join("")}</select>
+      <select data-fid="${esc(f.id)}" data-field="status">${
+        ["Open","In Progress","Resolved","Accepted Risk"]
+          .map(s=>`<option${s===f.status?" selected":""}>${s}</option>`).join("")}</select>
+      <button class="act" style="font-size:.75rem;padding:.2rem .5rem" onclick="saveFinding('${esc(f.id)}')">Save</button>
+    </div>`;
+  }
+
+  html+=`<div style="margin-top:.75rem;border-top:1px solid var(--line);padding-top:.5rem">
+    <span class="detail-label" style="font-size:.8rem">Change History</span>
+    <div id="history-${esc(f.id)}"><span style="color:var(--muted);font-size:.8rem">Loading…</span></div>
+  </div>`;
+
+  $("detail-body").innerHTML=html;
+  panel.classList.add("on");
+
+  document.querySelectorAll(".finding-row").forEach(r=>r.classList.toggle("selected",r.dataset.fid===id));
+
+  loadHistory(f.id);
+}
+
+async function loadHistory(id){
+  const h=await api("/api/findings/"+id+"/history").catch(()=>[]);
+  const box=$("history-"+id);
+  if(!box)return;
+  if(!h.length){
+    box.innerHTML='<span style="color:var(--muted);font-size:.8rem">No modifications yet.</span>';
+    return;
+  }
+  let html='<ul class="history-list">';
+  h.forEach(e=>{
+    const ts=e.ts?e.ts.slice(0,19).replace("T"," "):"";
+    let changes=[];
+    if(e.old_severity!==e.new_severity) changes.push(`severity: ${esc(e.old_severity)} → ${esc(e.new_severity)}`);
+    if(e.old_status!==e.new_status) changes.push(`status: ${esc(e.old_status)} → ${esc(e.new_status)}`);
+    html+=`<li class="history-item">
+      <span class="actor">${esc(e.actor)}</span> <span class="ts">${esc(ts)}</span>
+      ${changes.map(c=>`<div class="history-change">${c}</div>`).join("")}
+    </li>`;
+  });
+  html+='</ul>';
+  box.innerHTML=html;
+}
+
+function closeDetail(){
+  $("detail-panel").classList.remove("on");
+  document.querySelectorAll(".finding-row").forEach(r=>r.classList.remove("selected"));
+}
+
+// ── report viewer ────────────────────────────────────────────────────────────
+async function viewOriginalReport(id,filename){
+  const r=await api("/api/reports/"+id);
+  $("report-viewer-name").textContent=r.filename;
+  $("vc").textContent=r.content;
+  $("report-viewer").classList.add("on");
+}
+
+function closeReportViewer(){
+  $("report-viewer").classList.remove("on");
+}
+
+// ── save finding ─────────────────────────────────────────────────────────────
 async function saveFinding(id){
   const body={};
   document.querySelectorAll(`select[data-fid="${id}"]`)
@@ -222,16 +332,22 @@ async function saveFinding(id){
   try{
     await api(`/api/findings/${id}`,
       {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    loadFindings();
+    loadReportsAndFindings();
+    showFindingDetail(id);
   }catch(e){alert("Save failed: "+e.message);}
 }
 
-async function showHistory(id){
-  const h=await api(`/api/findings/${id}/history`);
-  alert(h.length
-    ?h.map(e=>`${e.ts.slice(0,16)} ${e.actor}: severity ${e.old_severity}→${e.new_severity||"—"}, status ${e.old_status}→${e.new_status||"—"}`).join("\n")
-    :"No modifications yet.");
-}
+// ── upload ────────────────────────────────────────────────────────────────────
+$("up").onsubmit=async e=>{
+  e.preventDefault();
+  const f=$("file").files[0];if(!f)return;
+  const fd=new FormData();fd.append("file",f);
+  try{
+    const r=await api("/api/reports/upload",{method:"POST",body:fd});
+    $("upmsg").textContent="Uploaded "+r.filename;
+    loadReportsAndFindings();
+  }catch(err){$("upmsg").textContent=err.message}
+};
 
 // ── chat ──────────────────────────────────────────────────────────────────────
 function addMsg(cls,text){
@@ -253,6 +369,7 @@ async function sendMessage(text){
       body:JSON.stringify({message:q,session_id:session})});
     session=r.session_id;
     p.textContent=r.response;
+    loadReportsAndFindings();
   }catch(err){p.textContent=err.message;p.classList.add("err")}
 }
 
