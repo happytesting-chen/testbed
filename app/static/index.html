@@ -231,9 +231,11 @@ async function loadReportsAndFindings(){
       html+=`<div class="finding-empty">No findings extracted from this report.</div>`;
     } else {
       if(isEditing){
+        html+='<div style="padding:.3rem .5rem .2rem 1.2rem;font-size:.78rem;font-weight:600;color:var(--muted)">Extracted Security Findings</div>';
         html+=renderEditTable(r.id,rf);
       } else {
-        html+=renderReadTable(rf);
+        html+='<div style="padding:.3rem .5rem .2rem 1.2rem;font-size:.78rem;font-weight:600;color:var(--muted)">Extracted Security Findings</div>';
+      html+=renderReadTable(rf);
       }
     }
     html+='</div>';

@@ -136,6 +136,7 @@ class CoordinatorAgent:
         if history is None:
             raise PermissionError("Session belongs to another user")
         cfg = self.db.get_agent_config()
+        flags.init(self.db)
         run_id = str(uuid.uuid4())
         self.db.start_run(run_id, session_id, actor, self.provider.model, cfg, message, run_tag)
         seq = 0

@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from . import auth_service, extractor, o01
+from . import auth_service, extractor, flags, o01, weakness_registry
 from .agents import CoordinatorAgent, DocumentReaderAgent, FindingsManagerAgent
 from .config import Settings, load_settings
 from .db import Database
@@ -95,6 +95,7 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
     app = FastAPI(title="Document Assistant (synthetic testbed)", version="0.2.0", docs_url=None, redoc_url=None,
                   openapi_url=None)
     roles = make_auth(settings)
+    flags.init(db)
     if provider:
         reader = DocumentReaderAgent(db, provider, settings.agent_max_steps)
         fm = FindingsManagerAgent(db, provider, settings.agent_max_steps)
@@ -205,6 +206,7 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
 
 def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
     app = FastAPI(title="Testbed evaluator (internal)", version="0.2.0")
+    flags.init(db)
 
     def evaluator(x_evaluator_token: str | None = Header(default=None)):
         if not x_evaluator_token or not _eq(x_evaluator_token, settings.evaluator_token):
@@ -310,6 +312,23 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
     @app.get("/api/validations", dependencies=guard)
     def validations():
         return db.list_validations()
+
+    @app.get("/api/weakness-registry", dependencies=guard)
+    def get_weakness_registry():
+        active = db.get_weakness_flags()
+        return weakness_registry.get_registry_with_state(active)
+
+    @app.get("/api/weakness-flags", dependencies=guard)
+    def get_weakness_flags():
+        return {"flags_on": db.get_weakness_flags()}
+
+    @app.put("/api/weakness-flags", dependencies=guard)
+    def set_weakness_flags(body: dict):
+        requested = body.get("flags_on", [])
+        valid = [f for f in requested if f in weakness_registry.IMPLEMENTED_IDS]
+        invalid = [f for f in requested if f not in weakness_registry.IMPLEMENTED_IDS]
+        db.set_weakness_flags(valid)
+        return {"flags_on": valid, "rejected_planned": invalid}
 
     return app
 

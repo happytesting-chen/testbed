@@ -17,8 +17,10 @@ from tests.conftest import (
 
 
 @pytest.fixture(autouse=True)
-def reset_flags():
+def reset_flags(env):
     """Ensure flags are cleared before and after every test."""
+    _, db = env
+    flags.init(db)
     flags.clear_flags()
     yield
     flags.clear_flags()

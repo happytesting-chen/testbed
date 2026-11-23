@@ -243,6 +243,19 @@ class Database:
             c.execute("INSERT OR REPLACE INTO settings VALUES('agent_config', ?)", (json.dumps(cfg),))
         return cfg
 
+    # ---- weakness flags -----------------------------------------------------
+    def get_weakness_flags(self) -> list[str]:
+        with self.conn() as c:
+            row = c.execute("SELECT value FROM settings WHERE key='weakness_flags'").fetchone()
+        if row:
+            return json.loads(row["value"])
+        return []
+
+    def set_weakness_flags(self, flags_on: list[str]):
+        with self.conn() as c:
+            c.execute("INSERT OR REPLACE INTO settings VALUES('weakness_flags', ?)",
+                      (json.dumps(sorted(set(flags_on))),))
+
     # ---- sessions, runs and trace events -----------------------------------
     def get_history(self, session_id: str, actor: str) -> list[dict] | None:
         with self.conn() as c:

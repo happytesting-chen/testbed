@@ -1,41 +1,46 @@
 """Feature flag mechanism for intentional weakness control.
 
+Flags are stored in SQLite (settings table, key='weakness_flags') so both
+the public app (port 8000) and evaluator app (port 8001) share the same state
+even when running as separate processes.
+
 Each weakness has a unique flag ID. When ON, the vulnerable path runs.
 When OFF (default), the secure path runs. Unknown flags return OFF.
 """
 import json
-from pathlib import Path
 
-_active_flags: set[str] = set()
-_loaded = False
+_db = None
 
 
-def load_flags(config_path: str | Path | None = None):
-    """Load active flags from a JSON config file or reset to empty."""
-    global _active_flags, _loaded
-    _active_flags = set()
-    if config_path:
-        p = Path(config_path)
-        if p.exists():
-            data = json.loads(p.read_text(encoding="utf-8"))
-            _active_flags = set(data.get("flags_on", []))
-    _loaded = True
-
-
-def set_flags(flags_on: list[str]):
-    """Programmatically set active flags (for tests)."""
-    global _active_flags, _loaded
-    _active_flags = set(flags_on)
-    _loaded = True
-
-
-def clear_flags():
-    """Reset all flags to OFF."""
-    global _active_flags, _loaded
-    _active_flags = set()
-    _loaded = True
+def init(db):
+    """Bind the flag module to a Database instance."""
+    global _db
+    _db = db
 
 
 def is_on(flag_id: str) -> bool:
     """Check if a weakness flag is active. Unknown IDs return False."""
-    return flag_id in _active_flags
+    if _db is None:
+        return False
+    return flag_id in set(_db.get_weakness_flags())
+
+
+def get_active(db=None) -> list[str]:
+    """Return the list of currently active flag IDs."""
+    d = db or _db
+    if d is None:
+        return []
+    return d.get_weakness_flags()
+
+
+def set_flags(flags_on: list[str], db=None):
+    """Set active flags (writes to SQLite)."""
+    d = db or _db
+    if d is None:
+        return
+    d.set_weakness_flags(flags_on)
+
+
+def clear_flags(db=None):
+    """Reset all flags to OFF."""
+    set_flags([], db)
