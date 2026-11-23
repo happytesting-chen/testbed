@@ -101,9 +101,9 @@ def test_weakness_registry_endpoint(make_clients):
     reg = r.json()
     assert len(reg) == 24
     implemented = [w for w in reg if w["status"] == "implemented"]
-    assert len(implemented) == 3
+    assert len(implemented) == 7
     ids = {w["id"] for w in implemented}
-    assert ids == {"RP1-03", "XA1-02", "IA2-01"}
+    assert ids == {"RP1-01", "RP1-02", "RP1-03", "RP1-04", "RP2-03", "XA1-02", "IA2-01"}
 
 
 def test_weakness_flags_cross_process(make_clients):
@@ -120,9 +120,9 @@ def test_weakness_flags_cross_process(make_clients):
 def test_weakness_flags_rejects_planned(make_clients):
     _, ev, _ = make_clients()
     r = ev.put("/api/weakness-flags", headers={**EVAL, "Content-Type": "application/json"},
-               json={"flags_on": ["RP1-03", "RP1-01"]})
+               json={"flags_on": ["RP1-03", "KM1-01"]})
     assert r.status_code == 200
-    assert "RP1-01" in r.json()["rejected_planned"]
+    assert "KM1-01" in r.json()["rejected_planned"]
     assert r.json()["flags_on"] == ["RP1-03"]
 
 
