@@ -75,6 +75,57 @@ def test_vendor_frontend_uses_safe_rendering():
     assert ".innerHTML=h" not in html or "history-list" in html
 
 
+def test_internal_has_report_hierarchy_and_test_panels():
+    html = (STATIC / "index_internal.html").read_text(encoding="utf-8")
+    assert "hierarchy-panel" in html
+    assert "loadReportsAndFindings" in html
+    assert "data-atk" in html
+    assert "atk-btn" in html
+    assert "loadCanary" in html
+    assert "CANARY" in html
+
+
+def test_evaluator_has_threats_tab():
+    html = (STATIC / "evaluator.html").read_text(encoding="utf-8")
+    assert "Threats &amp; Scenarios" in html
+    assert "threats-list" in html
+    assert "loadThreats" in html
+    assert "toggleFlag" in html
+    assert "weakness-card" in html
+
+
+def test_weakness_registry_endpoint(make_clients):
+    _, ev, _ = make_clients()
+    r = ev.get("/api/weakness-registry", headers=EVAL)
+    assert r.status_code == 200
+    reg = r.json()
+    assert len(reg) == 24
+    implemented = [w for w in reg if w["status"] == "implemented"]
+    assert len(implemented) == 3
+    ids = {w["id"] for w in implemented}
+    assert ids == {"RP1-03", "XA1-02", "IA2-01"}
+
+
+def test_weakness_flags_cross_process(make_clients):
+    """Verify flag changes via evaluator are visible to vendor app."""
+    pub, ev, db = make_clients()
+    r = ev.put("/api/weakness-flags", headers={**EVAL, "Content-Type": "application/json"},
+               json={"flags_on": ["RP1-03", "IA2-01"]})
+    assert r.status_code == 200
+    assert set(r.json()["flags_on"]) == {"RP1-03", "IA2-01"}
+    stored = db.get_weakness_flags()
+    assert set(stored) == {"IA2-01", "RP1-03"}
+
+
+def test_weakness_flags_rejects_planned(make_clients):
+    _, ev, _ = make_clients()
+    r = ev.put("/api/weakness-flags", headers={**EVAL, "Content-Type": "application/json"},
+               json={"flags_on": ["RP1-03", "RP1-01"]})
+    assert r.status_code == 200
+    assert "RP1-01" in r.json()["rejected_planned"]
+    assert r.json()["flags_on"] == ["RP1-03"]
+
+
 def test_telemetry_list_excludes_run_tag(make_clients):
     pub, ev, _ = make_clients()
     pub.post("/api/agent/chat", headers={**ANALYST, "X-Testbed-Run-Tag": "secret-tag"},

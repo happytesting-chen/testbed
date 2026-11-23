@@ -141,7 +141,7 @@ def check_test03_in_reports_table(js: str, file: str):
     has_t3_skip = ('grp.num === 3' in js or 'grp&&grp.num===3' in js or
                    'grp.num===3||grp.num===4' in js or 'grp.num===4' in js)
     if not has_t3_skip:
-        if 'loadReports' in js:
+        if 'loadReports' in js and 'testGroup' in js:
             issue(file, "TEST-03 skip not found in loadReports() — TEST-03 files may appear under Test 1 header")
 
 def check_evaluator_secrets(js: str, file: str):

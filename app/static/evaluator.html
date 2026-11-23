@@ -41,11 +41,35 @@ input,select{padding:.45rem;border:1px solid var(--line);border-radius:6px;backg
 .compare-table th{background:var(--bg);font-weight:600;color:var(--muted)}
 .changed{color:var(--bad);font-weight:650}.unchanged{color:var(--good)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.threat-group{margin-bottom:1.25rem}
+.threat-group-header{display:flex;align-items:center;gap:.5rem;padding:.5rem;background:var(--bg);border-radius:6px;margin-bottom:.5rem;cursor:pointer}
+.threat-group-header:hover{opacity:.85}
+.threat-code{font-weight:700;font-size:.85rem;color:var(--accent)}
+.threat-title{font-weight:600;font-size:.85rem;flex:1}
+.threat-stats{font-size:.75rem;color:var(--muted)}
+.weakness-card{border:1px solid var(--line);border-radius:6px;padding:.6rem .8rem;margin-bottom:.4rem;font-size:.85rem}
+.weakness-card.implemented{border-left:3px solid var(--accent)}
+.weakness-card.planned{border-left:3px solid var(--line);opacity:.7}
+.weakness-header{display:flex;align-items:center;gap:.5rem;cursor:pointer}
+.weakness-id{font-weight:700;font-family:monospace;font-size:.82rem;min-width:3.5rem}
+.weakness-name{flex:1}
+.weakness-badge{font-size:.7rem;padding:.1rem .4rem;border-radius:3px;font-weight:600}
+.weakness-badge.impl{background:#e8f5e9;color:var(--good)}
+.weakness-badge.plan{background:var(--bg);color:var(--muted)}
+.weakness-toggle{display:flex;gap:.3rem;align-items:center}
+.weakness-toggle button{font-size:.7rem;padding:.15rem .4rem;border-radius:3px;cursor:pointer;border:1px solid var(--line)}
+.weakness-toggle button.active-on{background:var(--bad);color:#fff;border-color:var(--bad);font-weight:600}
+.weakness-toggle button.active-off{background:var(--good);color:#fff;border-color:var(--good);font-weight:600}
+.weakness-detail{display:none;margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--line);font-size:.82rem;line-height:1.6}
+.weakness-detail.open{display:block}
+.weakness-detail dt{color:var(--muted);font-weight:600;margin-top:.3rem}
+.weakness-detail dd{margin:0 0 .2rem .8rem}
 </style>
 </head>
 <body>
 <header><h1>Evaluator</h1><nav>
 <button data-t="runs" aria-selected="true">Execution trace</button>
+<button data-t="threats" aria-selected="false">Threats &amp; Scenarios</button>
 <button data-t="validate" aria-selected="false">Controls</button>
 <button data-t="gt" aria-selected="false">Ground truth</button>
 </nav></header>
@@ -57,6 +81,17 @@ input,select{padding:.45rem;border:1px solid var(--line);border-radius:6px;backg
 <table><thead><tr><th>Attacker's Objective</th><th>Time</th><th>Actor</th><th>Prompt</th><th>Tag</th><th>Model</th><th>Attack Result</th></tr></thead><tbody id="runlist"></tbody></table></div>
 <div class="panel" id="trace" hidden></div>
 <p style="color:var(--muted);font-size:.85rem">The trace shows observable model requests, responses and tool executions. It does not show the model's internal reasoning.</p></section>
+
+<section id="threats">
+<div class="panel">
+  <h2 style="font-size:1rem;margin-top:0">Threats &amp; Scenarios</h2>
+  <p style="color:var(--muted);font-size:.85rem;margin-bottom:.75rem">
+    24 planted weaknesses across 7 threat categories. Toggle implemented weaknesses ON/OFF.
+    Changes apply to the vendor application immediately via shared SQLite storage.
+  </p>
+  <div id="threats-list"></div>
+</div>
+</section>
 
 <section id="validate">
 <div class="panel">
@@ -80,7 +115,7 @@ let token="";const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(p,o={}){o.headers={...(o.headers||{}),"X-Evaluator-Token":token};const r=await fetch(p,o);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||r.status);return b}
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.setAttribute("aria-selected",x===b));document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.t))});
-$("go").onclick=async()=>{token=$("tok").value.trim();try{await loadRuns();$("signin").hidden=true;loadCfg();loadGT()}catch(e){$("err").textContent="Access denied: "+e.message}};
+$("go").onclick=async()=>{token=$("tok").value.trim();try{await loadRuns();$("signin").hidden=true;loadCfg();loadGT();loadThreats()}catch(e){$("err").textContent="Access denied: "+e.message}};
 const J=o=>JSON.stringify(o,null,2);
 function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e}
 const TEST_OBJECTIVES={
@@ -461,6 +496,73 @@ async function loadCfg(){
 }
 async function loadGT(){const g=await api("/api/ground-truth");$("gtout").textContent=J(g);}
 $("reset").onclick=async()=>{if(!confirm("Delete all uploads, runs and traces and restore seed data?"))return;await api("/api/reset",{method:"POST"});loadRuns();loadCfg()};
+
+// ── Threats & Scenarios ─────────────────────────────────────────────────────
+const THREAT_NAMES={"RP.1":"Prompt Injection","RP.2":"Agent Goal Hijack","KM.1":"Memory & Context Poisoning","TA.1":"Tool Misuse & Exploitation","IA.1":"Identity & Privilege Abuse","IA.2":"Privilege Escalation via Scope Creep","XA.1":"Insecure Inter-Agent Communication"};
+
+async function loadThreats(){
+  const reg=await api("/api/weakness-registry");
+  const groups={};
+  reg.forEach(w=>{(groups[w.threat]=groups[w.threat]||[]).push(w)});
+  const box=$("threats-list");
+  let html='';
+  for(const [code,name] of Object.entries(THREAT_NAMES)){
+    const ws=groups[code]||[];
+    const impl=ws.filter(w=>w.status==='implemented').length;
+    html+=`<div class="threat-group">`;
+    html+=`<div class="threat-group-header">
+      <span class="threat-code">${esc(code)}</span>
+      <span class="threat-title">${esc(name)}</span>
+      <span class="threat-stats">${ws.length} weakness${ws.length!==1?'es':''}, ${impl} implemented</span>
+    </div>`;
+    ws.forEach(w=>{
+      const isImpl=w.status==='implemented';
+      const cardCls=isImpl?'implemented':'planned';
+      const badgeCls=isImpl?'impl':'plan';
+      const badgeText=isImpl?'Implemented':'Planned';
+      let toggleHtml='';
+      if(isImpl){
+        toggleHtml=`<div class="weakness-toggle">
+          <button class="${w.flag_on?'active-on':''}" onclick="event.stopPropagation();toggleFlag('${esc(w.id)}',true)">ON</button>
+          <button class="${!w.flag_on?'active-off':''}" onclick="event.stopPropagation();toggleFlag('${esc(w.id)}',false)">OFF</button>
+        </div>`;
+      }
+      html+=`<div class="weakness-card ${cardCls}">
+        <div class="weakness-header" onclick="toggleWeaknessDetail('${esc(w.id)}')">
+          <span class="weakness-id">${esc(w.id)}</span>
+          <span class="weakness-name">${esc(w.title)}</span>
+          <span class="weakness-badge ${badgeCls}">${badgeText}</span>
+          ${toggleHtml}
+        </div>
+        <div class="weakness-detail" id="wd-${esc(w.id)}">
+          <dl>
+            <dt>Component</dt><dd>${esc(w.component)} · Difficulty ${esc(w.difficulty)}</dd>
+            <dt>Secure behavior (flag OFF)</dt><dd>${esc(w.secure)}</dd>
+            <dt>Vulnerable behavior (flag ON)</dt><dd>${esc(w.vulnerable)}</dd>
+            <dt>Success oracle</dt><dd>${esc(w.oracle)}</dd>
+          </dl>
+        </div>
+      </div>`;
+    });
+    html+='</div>';
+  }
+  box.innerHTML=html;
+}
+
+function toggleWeaknessDetail(id){
+  const d=$("wd-"+id);
+  if(d)d.classList.toggle("open");
+}
+
+async function toggleFlag(id,on){
+  const current=await api("/api/weakness-flags");
+  let flags=new Set(current.flags_on||[]);
+  if(on)flags.add(id);else flags.delete(id);
+  await api("/api/weakness-flags",{method:"PUT",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({flags_on:[...flags]})});
+  loadThreats();
+}
 </script>
 </body>
 </html>
