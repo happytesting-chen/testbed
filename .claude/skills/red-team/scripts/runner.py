@@ -188,32 +188,64 @@ class RedTeamRunner:
 
     def run_validation(self, scenario: dict, frozen_attack: dict,
                        repeat_count: int | None = None,
-                       reset_fn=None) -> dict:
+                       reset_fn=None,
+                       expected_state: dict | None = None) -> dict:
         """Repeat the exact frozen attack inputs.
 
         Args:
             frozen_attack: dict with technique_id, payload_content,
                           payload_filename, chat_message
+            reset_fn: callable that restores the target to initial conditions
+            expected_state: snapshot of the expected initial state; if None,
+                           captured from the target before validation starts
         """
         self.validate_scenario(scenario)
         sid = scenario["id"]
         count = repeat_count or self.repeat_count
         frozen_hash = _hash(frozen_attack.get("payload_content"))
         has_reset = reset_fn is not None
-        runs = []
 
-        for i in range(1, count + 1):
-            reset_ok = True
+        # Capture expected initial state if not provided
+        if expected_state is None:
             if reset_fn:
                 try:
                     reset_fn()
+                except Exception:
+                    pass
+            expected_state = self.target.snapshot_state()
+
+        runs = []
+        all_verified_independent = True
+
+        for i in range(1, count + 1):
+            reset_ok = False
+            state_verified = False
+
+            if reset_fn:
+                try:
+                    reset_fn()
+                    reset_ok = True
                 except Exception as exc:
                     runs.append({"validation_run": i, "verdict": "ERROR",
-                                 "error": f"Reset failed: {exc}", "reset_ok": False})
+                                 "error": f"Reset failed: {exc}",
+                                 "reset_ok": False, "state_verified": False})
+                    all_verified_independent = False
                     continue
-            elif i > 1:
-                # No reset function — runs are not independent
-                pass
+
+                # Verify the state matches the expected baseline
+                post_reset_state = self.target.snapshot_state()
+                state_verified = (post_reset_state == expected_state)
+                if not state_verified:
+                    runs.append({"validation_run": i, "verdict": "ERROR",
+                                 "error": "State not restored to expected baseline after reset",
+                                 "reset_ok": True, "state_verified": False,
+                                 "expected_state": expected_state,
+                                 "actual_state": post_reset_state})
+                    all_verified_independent = False
+                    continue
+            else:
+                # No reset — not independent
+                all_verified_independent = False
 
             state_before = self.target.snapshot_state()
             rec = {
@@ -224,7 +256,8 @@ class RedTeamRunner:
                 "technique_id": frozen_attack["technique_id"],
                 "payload": {"content_hash": frozen_hash},
                 "chat_message": frozen_attack.get("chat_message"),
-                "state_before": state_before, "reset_ok": reset_ok,
+                "state_before": state_before,
+                "reset_ok": reset_ok, "state_verified": state_verified,
             }
             full_response = None
             try:
@@ -255,20 +288,35 @@ class RedTeamRunner:
             self._save(rec, f"{sid}_{self._run_id}_validation_{i}.json")
             runs.append(self._attacker_view(rec))
 
-        valid_runs = [r for r in runs
-                      if r.get("reset_ok", True) and r["verdict"] in ("SUCCEEDED", "FAILED")]
-        s = sum(1 for r in valid_runs if r["verdict"] == "SUCCEEDED")
-        excluded = len(runs) - len(valid_runs)
+        # Independent runs: reset succeeded AND state verified AND conclusive verdict
+        independent_runs = [r for r in runs
+                            if r.get("state_verified", False)
+                            and r["verdict"] in ("SUCCEEDED", "FAILED")]
+        # Observed runs (no independence requirement): any conclusive verdict
+        observed_runs = [r for r in runs
+                         if r.get("reset_ok", False) or not has_reset
+                         if r["verdict"] in ("SUCCEEDED", "FAILED")]
+
+        ind_s = sum(1 for r in independent_runs if r["verdict"] == "SUCCEEDED")
+        obs_s = sum(1 for r in observed_runs if r["verdict"] == "SUCCEEDED")
 
         return {
-            "repetitions": len(runs), "valid_runs": len(valid_runs),
-            "succeeded": s, "failed": len(valid_runs) - s,
+            "repetitions": len(runs),
+            "independent_runs": len(independent_runs),
+            "observed_runs": len(observed_runs),
+            "succeeded": obs_s,
+            "failed": len(observed_runs) - obs_s,
             "inconclusive": sum(1 for r in runs if r["verdict"] == "INCONCLUSIVE"),
             "errors": sum(1 for r in runs if r["verdict"] == "ERROR"),
-            "excluded_from_asr": excluded,
-            "observed_success_rate": s / len(valid_runs) if valid_runs else None,
+            "independently_validated": has_reset and all_verified_independent and len(independent_runs) > 0,
+            "independent_asr": ind_s / len(independent_runs) if independent_runs else None,
+            "observed_asr": obs_s / len(observed_runs) if observed_runs else None,
             "frozen_payload_hash": frozen_hash,
-            "independently_validated": has_reset,
+            "state_coverage_note": (
+                "Snapshot covers only target.snapshot_state() — chat history, "
+                "uploaded documents, session state, and agent memory may not be "
+                "verified by the current adapter."
+            ),
             "runs": runs,
         }
 

@@ -235,6 +235,108 @@ def test_evaluator_receives_full_response(tmp_path):
 
 # ── Validation ────────────────────────────────────────────────────────────────
 
+# ── Independent validation ─────────────────────────────────────────────────
+
+def test_valid_reset_and_state_restored(tmp_path):
+    """Reset succeeds and state matches expected → independently validated."""
+    state = {"findings": {"f1": {"severity": "Critical"}}}
+    target = MockTarget(state=state)
+    def always_fail(record, scenario):
+        return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=target, evaluator=always_fail,
+                           records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3,
+                                   reset_fn=lambda: None,
+                                   expected_state=state)
+    assert result["independently_validated"] is True
+    assert result["independent_runs"] == 3
+    assert result["independent_asr"] is not None
+    for run in result["runs"]:
+        assert run.get("state_verified") is True
+
+
+def test_reset_succeeds_but_state_not_restored(tmp_path):
+    """Reset returns without error but state differs → excluded from independent ASR."""
+    call = {"n": 0}
+    class DriftingTarget:
+        def chat(self, message, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, filename, content):
+            return {"id": "u1"}
+        def snapshot_state(self):
+            call["n"] += 1
+            if call["n"] <= 1:
+                return {"findings": {"f1": {"severity": "Critical"}}}
+            return {"findings": {"f1": {"severity": "Low"}}}
+
+    runner = RedTeamRunner(target=DriftingTarget(), records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    expected = {"findings": {"f1": {"severity": "Critical"}}}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3,
+                                   reset_fn=lambda: None,
+                                   expected_state=expected)
+    assert result["independently_validated"] is False
+    state_errors = [r for r in result["runs"]
+                    if "not restored" in r.get("error", "")]
+    assert len(state_errors) >= 1
+    assert result["independent_asr"] is None or result["independent_runs"] == 0
+
+
+def test_reset_raises_exception(tmp_path):
+    """Reset raises → ERROR, excluded from both ASR calculations."""
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3,
+                                   reset_fn=lambda: (_ for _ in ()).throw(RuntimeError("broken")))
+    assert result["errors"] == 3
+    assert result["independently_validated"] is False
+    assert result["independent_asr"] is None
+
+
+def test_no_reset_not_independent(tmp_path):
+    """No reset_fn → observed ASR only, not independently validated."""
+    def always_fail(record, scenario):
+        return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=always_fail,
+                           records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3)
+    assert result["independently_validated"] is False
+    assert result["independent_asr"] is None
+    assert result["observed_asr"] is not None
+
+
+def test_asr_excludes_unverified_runs(tmp_path):
+    """ASR denominator includes only verified-independent + conclusive runs."""
+    call = {"n": 0}
+    state_ok = {"findings": {"f1": {"severity": "Critical"}}}
+    class FlickerTarget:
+        def chat(self, message, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, filename, content):
+            return {"id": "u1"}
+        def snapshot_state(self):
+            call["n"] += 1
+            # Runs 1,2 return expected state; run 3 drifts
+            if call["n"] % 4 == 0:  # after some resets, state drifts
+                return {"findings": {"f1": {"severity": "Low"}}}
+            return state_ok
+
+    runner = RedTeamRunner(target=FlickerTarget(), records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=5,
+                                   reset_fn=lambda: None,
+                                   expected_state=state_ok)
+    # Some runs should be excluded due to state mismatch
+    total_attempted = result["repetitions"]
+    independent = result["independent_runs"]
+    assert independent <= total_attempted
+    # Verify counts add up
+    errors = result["errors"]
+    assert independent + errors + result["inconclusive"] <= total_attempted
+
+
 def test_frozen_attack_includes_all_inputs(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
     frozen = {"technique_id": "PI-001", "payload_content": "doc",
@@ -243,23 +345,27 @@ def test_frozen_attack_includes_all_inputs(tmp_path):
     assert result["frozen_payload_hash"] == _hash("doc")
     assert result["repetitions"] == 2
 
-def test_no_reset_marked_not_independent(tmp_path):
+def test_no_reset_marked_not_independent_legacy(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
     frozen = {"technique_id": "PI-001", "chat_message": "test"}
     result = runner.run_validation(APPROVED, frozen, repeat_count=2)
     assert result["independently_validated"] is False
+    assert result["independent_asr"] is None
 
-def test_reset_failures_excluded(tmp_path):
+def test_reset_failures_excluded_legacy(tmp_path):
+    state = {"findings": {"f1": {"severity": "Critical"}}}
     n = {"c": 0}
     def bad_reset():
         n["c"] += 1
         if n["c"] <= 2: raise RuntimeError("fail")
-    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    runner = RedTeamRunner(target=MockTarget(state=state),
+                           records_dir=str(tmp_path / "r"))
     frozen = {"technique_id": "PI-001", "chat_message": "test"}
-    result = runner.run_validation(APPROVED, frozen, repeat_count=4, reset_fn=bad_reset)
+    result = runner.run_validation(APPROVED, frozen, repeat_count=5,
+                                   reset_fn=bad_reset, expected_state=state)
     assert result["errors"] >= 2
-    assert result["excluded_from_asr"] >= 2
-    assert result["independently_validated"] is True
+    # Only runs with verified state count as independent
+    assert result["independently_validated"] is False  # not all verified
 
 
 # ── Record uniqueness ─────────────────────────────────────────────────────────
