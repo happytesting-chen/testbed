@@ -219,6 +219,28 @@ def test_evaluator_creates_results_dir(tmp_path):
 def test_skill_files_exist():
     """All three skill definition files exist."""
     root = Path(__file__).parent.parent
-    assert (root / ".claude/skills/threat-model/threat-model.md").exists()
+    assert (root / ".claude/skills/threat-model/SKILL.md").exists()
     assert (root / ".claude/skills/red-team/red-team.md").exists()
     assert (root / ".claude/skills/evaluate/evaluate.md").exists()
+
+
+def test_threat_model_skill_is_generic():
+    """The generic skill instructions must not contain hardcoded application paths."""
+    root = Path(__file__).parent.parent
+    text = (root / ".claude/skills/threat-model/SKILL.md").read_text(encoding="utf-8")
+    assert "coordinator.py" not in text
+    assert "reader.py" not in text
+    assert "findings_manager.py" not in text
+    assert "app/agents/" not in text
+    assert "app/weakness_registry.py" not in text
+    assert "DocAssist" not in text
+
+
+def test_threat_model_has_reference_file():
+    """Document Assistant-specific guidance is in a reference file, not the skill."""
+    root = Path(__file__).parent.parent
+    ref = root / ".claude/skills/threat-model/references/document_assistant.md"
+    assert ref.exists()
+    text = ref.read_text(encoding="utf-8")
+    assert "coordinator.py" in text
+    assert "weakness_registry.py" in text
