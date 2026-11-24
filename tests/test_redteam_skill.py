@@ -137,29 +137,83 @@ def test_budget_rejects_zero(tmp_path):
 # ── Evaluator isolation ───────────────────────────────────────────────────────
 
 def test_attacker_view_hides_evaluator_evidence(tmp_path):
+    SECRET = "EVALUATOR-SECRET-TOKEN-XYZ-9876"
     def mock_eval(record, scenario):
         return {"verdict": "SUCCEEDED",
-                "evidence": [{"type": "secret_db_check", "grant_id": "g1"}],
+                "evidence": [{"type": "secret_db_check", "grant_id": "g1",
+                              "evaluator_token": SECRET}],
                 "attacker_feedback": "SUCCEEDED"}
     runner = RedTeamRunner(target=MockTarget(), evaluator=mock_eval,
                            records_dir=str(tmp_path / "r"))
     record = runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
+    record_text = json.dumps(record)
     assert "_evaluator_evidence" not in record
     assert "_full_response" not in record
+    assert SECRET not in record_text
     assert record["verdict"] == "SUCCEEDED"
     assert record["attacker_feedback"] == "SUCCEEDED"
 
 def test_saved_file_has_no_private_fields(tmp_path):
+    SECRET = "PRIVATE-GRANT-ID-abc123"
     def mock_eval(record, scenario):
-        return {"verdict": "FAILED", "evidence": [{"type": "internal"}]}
+        return {"verdict": "FAILED",
+                "evidence": [{"type": "internal", "secret": SECRET}]}
     runner = RedTeamRunner(target=MockTarget(), evaluator=mock_eval,
                            records_dir=str(tmp_path / "r"))
     runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
     files = list((tmp_path / "r").glob("*.json"))
     assert len(files) >= 1
-    content = json.loads(files[0].read_text())
-    assert "_evaluator_evidence" not in content
-    assert "_full_response" not in content
+    content_text = files[0].read_text()
+    assert "_evaluator_evidence" not in content_text
+    assert "_full_response" not in content_text
+    assert SECRET not in content_text
+
+def test_evaluator_receives_isolated_input(tmp_path):
+    """Evaluator gets an isolated dict, not the full record by reference."""
+    received_keys = {}
+    def capture_eval(record, scenario):
+        received_keys["keys"] = set(record.keys())
+        return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=capture_eval,
+                           records_dir=str(tmp_path / "r"))
+    runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
+    # Evaluator should receive a minimal isolated dict, not the full record
+    assert "technique_id" not in received_keys["keys"]
+    assert "payload" not in received_keys["keys"]
+    assert "chat_message" not in received_keys["keys"]
+    # But it should receive state and response
+    assert "state_before" in received_keys["keys"]
+    assert "state_after" in received_keys["keys"]
+    assert "_full_response" in received_keys["keys"]
+
+def test_validation_runs_stripped(tmp_path):
+    """Validation run records must not contain evaluator evidence."""
+    SECRET = "VALIDATION-EVIDENCE-SECRET-999"
+    def mock_eval(record, scenario):
+        return {"verdict": "SUCCEEDED",
+                "evidence": [{"type": "auth_check", "token": SECRET}]}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=mock_eval,
+                           records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=2)
+    for run in result["runs"]:
+        run_text = json.dumps(run)
+        assert SECRET not in run_text
+        assert "_evaluator" not in run_text
+        assert "_full_response" not in run_text
+
+def test_evaluator_evidence_not_in_attacker_feedback(tmp_path):
+    """Attacker feedback must be a simple string verdict, not evidence."""
+    def tricky_eval(record, scenario):
+        return {"verdict": "SUCCEEDED",
+                "evidence": [{"grant_id": "SECRET-GRANT"}],
+                "attacker_feedback": {"verdict": "SUCCEEDED", "grant": "SECRET-GRANT"}}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=tricky_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
+    # attacker_feedback must be a string, not a dict that could carry evidence
+    assert isinstance(record["attacker_feedback"], str)
+    assert "SECRET-GRANT" not in json.dumps(record)
 
 
 # ── Full response for disclosure ──────────────────────────────────────────────

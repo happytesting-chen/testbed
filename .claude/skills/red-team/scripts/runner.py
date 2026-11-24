@@ -159,13 +159,21 @@ class RedTeamRunner:
                 except Exception:
                     record["trace"] = {"unavailable": True}
 
-            # Evaluate — pass full response to evaluator, not truncated preview
-            eval_record = {**record, "_full_response": full_response}
-            verdict = self.evaluator(eval_record, scenario)
+            # Evaluate — build an isolated copy for the evaluator
+            eval_input = {
+                "state_before": record.get("state_before"),
+                "state_after": record.get("state_after"),
+                "response_preview": record.get("response_preview"),
+                "run_id": record.get("run_id"),
+                "_full_response": full_response,
+            }
+            verdict = self.evaluator(eval_input, scenario)
             v = verdict.get("verdict", "INCONCLUSIVE")
             record["verdict"] = v if v in VALID_VERDICTS else "INCONCLUSIVE"
-            # Separate attacker feedback from evaluator evidence
-            record["attacker_feedback"] = verdict.get("attacker_feedback", v)
+            # Only sanitized feedback reaches the attacker-visible record
+            feedback = verdict.get("attacker_feedback", v)
+            record["attacker_feedback"] = feedback if isinstance(feedback, str) else v
+            # Evaluator evidence stored with _ prefix — stripped by _attacker_view and _save
             record["_evaluator_evidence"] = verdict.get("evidence", [])
 
         except Exception as exc:
@@ -231,15 +239,21 @@ class RedTeamRunner:
                     full_response = result.get("response", "")
                     rec["response_preview"] = full_response[:500]
                 rec["state_after"] = self.target.snapshot_state()
-                eval_rec = {**rec, "_full_response": full_response}
-                verdict = self.evaluator(eval_rec, scenario)
+                eval_input = {
+                    "state_before": rec.get("state_before"),
+                    "state_after": rec.get("state_after"),
+                    "response_preview": rec.get("response_preview"),
+                    "run_id": rec.get("run_id"),
+                    "_full_response": full_response,
+                }
+                verdict = self.evaluator(eval_input, scenario)
                 rec["verdict"] = verdict.get("verdict", "INCONCLUSIVE")
             except Exception as exc:
                 rec["error"] = str(exc)
                 rec["verdict"] = "ERROR"
 
-            runs.append(rec)
             self._save(rec, f"{sid}_{self._run_id}_validation_{i}.json")
+            runs.append(self._attacker_view(rec))
 
         valid_runs = [r for r in runs
                       if r.get("reset_ok", True) and r["verdict"] in ("SUCCEEDED", "FAILED")]

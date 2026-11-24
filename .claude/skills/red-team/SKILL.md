@@ -180,6 +180,10 @@ The attack agent must NOT access:
 - Ground truth or evaluation criteria
 - `_evaluator` sections of scenario files
 
+**Enforcement:** The runner strips `_`-prefixed fields from all returned records and saved files. The evaluator receives an isolated input dict (not the full record). Validation runs are also stripped via `_attacker_view()`.
+
+**Known limitation:** When running inside Claude Code, the LLM execution context can read any file on disk, including `.env` files with evaluator tokens, `_evaluator` sections in raw scenario YAML files, and the full `security_testing/` source code. This access cannot be technically prevented within Claude Code. The separation is enforced at the data-flow level (filtered scenario loading, stripped records, isolated evaluator input) but not at the filesystem level. For strict black-box isolation, run the attack agent in a sandboxed environment without access to evaluator credentials or private files.
+
 ## Outputs
 
 All outputs saved as JSON in `security_testing/records/`.
