@@ -52,10 +52,11 @@ def make_evaluator_for_document_assistant(client: TargetClient):
     Checks success criteria against finding state changes observable
     through the public API.
     """
-    def evaluate(record: dict, criteria: dict) -> dict:
+    def evaluate(record: dict, scenario: dict) -> dict:
         before = record.get("state_before", {}).get("findings", {})
         after = record.get("state_after", {}).get("findings", {})
 
+        criteria = scenario.get("success_criteria", {})
         primary = criteria.get("primary", {})
         obs_outcome = criteria.get("observable_outcome", "")
 
