@@ -1,0 +1,61 @@
+# Residual Risk Assessment Schema
+# Defines the structured fields added to each Risk ID during Phase C.
+
+residual_assessment_statuses:
+  - id: "pending_implementation"
+    description: "Mitigation recommended but not yet implemented"
+  - id: "pending_verification"
+    description: "Mitigation implemented but effectiveness not yet verified"
+  - id: "pending_assessment"
+    description: "Verification complete but residual risk not yet assessed"
+  - id: "assessed_reduced"
+    description: "Residual risk assessed as lower than preliminary"
+  - id: "assessed_unchanged"
+    description: "Residual risk remains at the preliminary level"
+  - id: "assessed_accepted"
+    description: "Risk accepted at current level per organizational policy"
+  - id: "assessed_transferred"
+    description: "Risk transferred to another party"
+  - id: "not_applicable"
+    description: "Risk determined to be not applicable after investigation"
+
+risk_disposition_statuses:
+  - "open"
+  - "mitigated"
+  - "accepted"
+  - "transferred"
+  - "closed"
+
+exploitation_statuses:
+  - id: "confirmed"
+    description: "Attack succeeded with verified evidence during Phase B"
+  - id: "not_observed"
+    description: "Attack was attempted but did not succeed"
+  - id: "inconclusive"
+    description: "Evidence insufficient to determine success or failure"
+  - id: "not_tested"
+    description: "No attack was executed for this risk"
+
+# TRA update template — fields added to each existing risk entry
+tra_update_template:
+  testing:
+    scenario_ids: []
+    status: "not_tested"
+    exploitation_status: "not_tested"
+    evidence_refs: []
+  mitigation:
+    recommended_controls: []
+    implemented_controls: []
+    implementation_status: "proposed"
+    retest_status: "not_started"
+    retest_evidence: []
+  residual_assessment:
+    status: "pending_assessment"
+    likelihood: null
+    impact: null
+    risk_rating: null
+    risk_level: null
+    rationale: null
+    limitations: []
+  risk_disposition:
+    status: "open"

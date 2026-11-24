@@ -1,0 +1,64 @@
+# Security Mitigation Guidance for AI Agent Applications
+# Generic reference — applicable to any multi-agent AI system.
+
+categories:
+  - id: "AUTH"
+    name: "Authentication and Authorization"
+    controls:
+      - "Enforce authentication at every trust boundary, not just the entry point"
+      - "Verify user identity independently at each agent that performs privileged operations"
+      - "Do not trust role or identity claims from inter-agent messages without independent verification"
+      - "Implement least-privilege for agent service accounts"
+      - "Require explicit approval for privilege escalation or temporary scope grants"
+      - "Bind temporary permissions to specific resources, sessions, and time limits"
+
+  - id: "INPUT"
+    name: "Input Validation and Untrusted Content Handling"
+    controls:
+      - "Mark all external content (documents, user input, tool outputs) as untrusted"
+      - "Wrap untrusted content in explicit delimiters before passing to LLMs"
+      - "Include untrusted-content instructions in agent system prompts"
+      - "Validate tool arguments against allowed values before execution"
+      - "Do not pass raw untrusted content as operational instructions to downstream agents"
+
+  - id: "PROMPT"
+    name: "Prompt Injection Defenses"
+    controls:
+      - "Include instruction hierarchy in system prompts distinguishing system instructions from content"
+      - "Treat agent-to-agent responses as data, not as instructions"
+      - "Do not include secrets, credentials, or sensitive identifiers in system prompts"
+      - "Do not auto-delegate privileged actions based on agent output without user confirmation"
+      - "Implement output filtering for known sensitive patterns"
+
+  - id: "AGENT"
+    name: "Inter-Agent Communication Security"
+    controls:
+      - "Separate structured operational parameters from lower-trust narrative in inter-agent relay"
+      - "Validate resource references received from other agents against task scope"
+      - "Do not forward full conversation history or credentials to agents that don't need them"
+      - "Verify authority claims against backend records, not against agent-generated text"
+      - "Limit each agent's tool access to what its task requires"
+
+  - id: "DATA"
+    name: "Data Access and Protection"
+    controls:
+      - "Scope data access to the user's authorized resources"
+      - "Redact internal or sensitive content from search and retrieval results"
+      - "Do not expose cross-user or cross-project data through shared retrieval"
+      - "Protect secrets and credentials in separate stores, not in prompts or context"
+
+  - id: "MEMORY"
+    name: "Memory and Context Isolation"
+    controls:
+      - "Sanitize conversation history to remove instruction-like content between turns"
+      - "Send only current task context to sub-agents, not full session history"
+      - "Rank retrieval results by source trust, not just relevance"
+      - "Isolate session state to prevent cross-session influence"
+
+  - id: "MONITOR"
+    name: "Monitoring and Detection"
+    controls:
+      - "Log all agent tool calls, delegations, and authorization decisions"
+      - "Monitor for unusual patterns: unexpected delegations, rapid privilege escalation, out-of-scope tool calls"
+      - "Implement canary tokens in sensitive locations to detect unauthorized access"
+      - "Record sufficient evidence to verify whether attacks succeeded or were blocked"
