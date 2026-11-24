@@ -366,7 +366,7 @@ def test_reports_included_in_state_snapshot():
 
     state = target.snapshot_state()
     assert state["report_count"] == 2
-    assert state["report_ids"] == ["r1", "r2"]
+    assert "report_ids" not in state
     assert state["has_session"] is True
 
 
@@ -526,3 +526,112 @@ def test_summary_has_exploitation_status(tmp_path):
     assert summary["exploitation_status"] == "confirmed"
     assert summary["phase"] == "summary"
     assert summary["related_risk_ids"] == ["RISK-001"]
+
+
+# ── Issue 3: Attack scope enforcement ────────────────────────────────────────
+
+ENTRY_UPLOAD_CAPS_NONE = {
+    **APPROVED,
+    "attacker": {
+        "role": "analyst",
+        "capabilities": ["Read findings"],
+        "entry_point": {"method": "POST /api/reports/upload", "channel": "C2"},
+    },
+}
+
+def test_upload_rejected_when_not_in_capabilities(tmp_path):
+    """Entry-point mentions upload but capabilities don't — must reject."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.execute_attempt(ENTRY_UPLOAD_CAPS_NONE, "PI-001",
+                               payload_content="malicious")
+    assert len(target.uploads) == 0
+
+def test_chat_rejected_when_not_in_capabilities(tmp_path):
+    """Chat-only attacker — upload rejected."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.execute_attempt(CHAT_ONLY, "PI-001", payload_content="data")
+    assert len(target.uploads) == 0
+    assert len(target.chats) == 0
+
+def test_upload_only_rejects_chat(tmp_path):
+    """Upload-only attacker — chat rejected."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
+        runner.execute_attempt(UPLOAD_ONLY, "PI-001", chat_message="test")
+    assert len(target.chats) == 0
+    assert len(target.uploads) == 0
+
+def test_combined_allowed_when_both_in_capabilities(tmp_path):
+    """Both upload and chat in capabilities — combined attack permitted."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001",
+                                     payload_content="doc", chat_message="go")
+    assert len(target.uploads) == 1
+    assert len(target.chats) == 1
+
+def test_missing_capabilities_fail_closed(tmp_path):
+    """No capabilities field — must reject any action."""
+    no_caps = {**APPROVED, "attacker": {"role": "analyst"}}
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.execute_attempt(no_caps, "PI-001", payload_content="data")
+
+def test_empty_capabilities_fail_closed(tmp_path):
+    """Empty capabilities list — must reject any action."""
+    empty_caps = {**APPROVED, "attacker": {"role": "analyst", "capabilities": []}}
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
+        runner.execute_attempt(empty_caps, "PI-001", chat_message="test")
+
+def test_validation_rejects_unauthorized_upload(tmp_path):
+    """Frozen attack with upload rejected during validation when not in capabilities."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "payload_content": "malicious",
+              "payload_filename": "attack.md", "chat_message": "go"}
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.run_validation(CHAT_ONLY, frozen, repeat_count=1)
+    assert len(target.uploads) == 0
+    assert len(target.chats) == 0
+
+def test_validation_rejects_unauthorized_chat(tmp_path):
+    """Frozen attack with chat rejected during validation when not in capabilities."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "attack"}
+    with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
+        runner.run_validation(UPLOAD_ONLY, frozen, repeat_count=1)
+    assert len(target.chats) == 0
+
+def test_validation_allows_authorized_actions(tmp_path):
+    """Frozen attack matching capabilities executes normally in validation."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=2)
+    assert result["repetitions"] == 2
+
+def test_access_mode_does_not_expand_capabilities(tmp_path):
+    """White-box mode gives trace visibility, not extra attack actions."""
+    target = MockTarget()
+    for mode in ("black_box", "grey_box", "white_box"):
+        runner = RedTeamRunner(target=target, access_mode=mode,
+                               records_dir=str(tmp_path / f"r_{mode}"))
+        with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+            runner.execute_attempt(CHAT_ONLY, "PI-001", payload_content="data")
+    assert len(target.uploads) == 0
+
+def test_no_target_side_effects_on_rejection(tmp_path):
+    """Rejected attempt must produce zero target-side calls."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError):
+        runner.execute_attempt(UPLOAD_ONLY, "PI-001", chat_message="steal")
+    assert len(target.chats) == 0
+    assert len(target.uploads) == 0

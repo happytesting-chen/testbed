@@ -59,10 +59,7 @@ class RedTeamRunner:
 
     def _can_upload(self, scenario: dict) -> bool:
         caps = scenario.get("attacker", {}).get("capabilities", [])
-        entry = scenario.get("attacker", {}).get("entry_point", {})
-        method = entry.get("method", "")
-        return ("upload" in method.lower() or
-                any("upload" in c.lower() for c in caps))
+        return any("upload" in c.lower() for c in caps)
 
     def _can_chat(self, scenario: dict) -> bool:
         caps = scenario.get("attacker", {}).get("capabilities", [])
@@ -200,6 +197,11 @@ class RedTeamRunner:
                            captured from the target before validation starts
         """
         self.validate_scenario(scenario)
+        self._validate_actions(
+            scenario,
+            has_upload=bool(frozen_attack.get("payload_content")),
+            has_chat=bool(frozen_attack.get("chat_message")),
+        )
         sid = scenario["id"]
         count = repeat_count or self.repeat_count
         frozen_hash = _hash(frozen_attack.get("payload_content"))

@@ -25,19 +25,18 @@ class DocumentAssistantTarget:
         state = {}
         try:
             findings = self.client.get_findings()
+            # Key by finding_id (stable across resets), not database UUID
             state["findings"] = {
-                f["id"]: {"finding_id": f.get("finding_id"),
-                          "severity": f["severity"], "status": f["status"]}
+                f.get("finding_id", f["id"]): {
+                    "severity": f["severity"], "status": f["status"]}
                 for f in findings}
         except Exception:
             state["findings"] = {}
         try:
             reports = self.client.get_reports()
             state["report_count"] = len(reports)
-            state["report_ids"] = sorted(r["id"] for r in reports)
         except Exception:
             state["report_count"] = None
-            state["report_ids"] = None
         state["has_session"] = self._session_id is not None
         return state
 
