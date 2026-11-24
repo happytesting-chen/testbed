@@ -337,6 +337,128 @@ def test_asr_excludes_unverified_runs(tmp_path):
     assert independent + errors + result["inconclusive"] <= total_attempted
 
 
+def test_session_cleared_between_validation_runs(tmp_path):
+    """Runner calls reset_session() before each validation run."""
+    session_clears = {"count": 0}
+    class SessionTarget(MockTarget):
+        def reset_session(self):
+            session_clears["count"] += 1
+
+    def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=SessionTarget(), evaluator=fail_eval,
+                           records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    runner.run_validation(APPROVED, frozen, repeat_count=3)
+    assert session_clears["count"] == 3
+
+
+def test_reports_included_in_state_snapshot():
+    """Document Assistant adapter includes report count in snapshot."""
+    from security_testing.adapters.document_assistant import DocumentAssistantTarget
+
+    class FakeClient:
+        def get_findings(self): return []
+        def get_reports(self): return [{"id": "r1"}, {"id": "r2"}]
+
+    target = DocumentAssistantTarget.__new__(DocumentAssistantTarget)
+    target.client = FakeClient()
+    target._session_id = "sess-1"
+
+    state = target.snapshot_state()
+    assert state["report_count"] == 2
+    assert state["report_ids"] == ["r1", "r2"]
+    assert state["has_session"] is True
+
+
+def test_reset_fn_with_seed_restores_findings(tmp_path):
+    """Full reset + re-seed restores the expected state including findings."""
+    findings_db = {"f1": {"severity": "Critical"}}
+    class StatefulTarget:
+        def __init__(self):
+            self.state = dict(findings_db)
+            self._session_id = None
+        def chat(self, m, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, f, c): return {"id": "u1"}
+        def reset_session(self): self._session_id = None
+        def snapshot_state(self):
+            return {"findings": dict(self.state), "has_session": self._session_id is not None}
+
+    target = StatefulTarget()
+    expected = {"findings": {"f1": {"severity": "Critical"}}, "has_session": False}
+
+    def reset():
+        target.state = dict(findings_db)
+
+    def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=target, evaluator=fail_eval,
+                           records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3,
+                                   reset_fn=reset, expected_state=expected)
+    assert result["independently_validated"] is True
+    assert result["independent_runs"] == 3
+
+
+def test_residual_reports_detected(tmp_path):
+    """If uploaded attack documents remain after reset, state verification fails."""
+    call = {"n": 0}
+    class LeakyTarget:
+        def __init__(self):
+            self._session_id = None
+        def chat(self, m, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, f, c): return {"id": "u1"}
+        def reset_session(self): self._session_id = None
+        def snapshot_state(self):
+            call["n"] += 1
+            if call["n"] <= 1:
+                return {"findings": {}, "report_count": 0, "has_session": False}
+            return {"findings": {}, "report_count": 1, "has_session": False}
+
+    target = LeakyTarget()
+    expected = {"findings": {}, "report_count": 0, "has_session": False}
+
+    def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=target, evaluator=fail_eval,
+                           records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3,
+                                   reset_fn=lambda: None,
+                                   expected_state=expected)
+    assert result["independently_validated"] is False
+    state_errors = [r for r in result["runs"] if "not restored" in r.get("error", "")]
+    assert len(state_errors) >= 1
+
+
+def test_scope_grants_cleared_by_reset(tmp_path):
+    """Scope grants from previous runs must not persist."""
+    grant_state = {"has_grant": False}
+    class GrantTarget:
+        def __init__(self):
+            self._session_id = None
+        def chat(self, m, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, f, c): return {"id": "u1"}
+        def reset_session(self): self._session_id = None
+        def snapshot_state(self):
+            return {"findings": {}, "has_grant": grant_state["has_grant"], "has_session": False}
+
+    target = GrantTarget()
+    expected = {"findings": {}, "has_grant": False, "has_session": False}
+
+    def reset():
+        grant_state["has_grant"] = False  # properly clears grants
+
+    def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=target, evaluator=fail_eval,
+                           records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PE-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3,
+                                   reset_fn=reset, expected_state=expected)
+    assert result["independently_validated"] is True
+
+
 def test_frozen_attack_includes_all_inputs(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
     frozen = {"technique_id": "PI-001", "payload_content": "doc",

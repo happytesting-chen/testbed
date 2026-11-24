@@ -35,6 +35,12 @@ class TargetClient:
         r.raise_for_status()
         return r.json()
 
+    def get_reports(self) -> list[dict]:
+        r = httpx.get(f"{self.base_url}/api/reports",
+                      headers=self.headers, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json()
+
     def get_findings(self) -> list[dict]:
         r = httpx.get(f"{self.base_url}/api/findings",
                       headers=self.headers, timeout=self.timeout)

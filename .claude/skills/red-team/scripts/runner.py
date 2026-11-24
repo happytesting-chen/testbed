@@ -221,6 +221,10 @@ class RedTeamRunner:
             reset_ok = False
             state_verified = False
 
+            # Always start a fresh session if the target supports it
+            if hasattr(self.target, "reset_session"):
+                self.target.reset_session()
+
             if reset_fn:
                 try:
                     reset_fn()
@@ -313,9 +317,10 @@ class RedTeamRunner:
             "observed_asr": obs_s / len(observed_runs) if observed_runs else None,
             "frozen_payload_hash": frozen_hash,
             "state_coverage_note": (
-                "Snapshot covers only target.snapshot_state() — chat history, "
-                "uploaded documents, session state, and agent memory may not be "
-                "verified by the current adapter."
+                "State verification depends on the target adapter's snapshot_state(). "
+                "The runner also calls reset_session() (if available) for fresh sessions. "
+                "Components not covered by snapshot_state (e.g., agent memory, internal caches) "
+                "are not verified between runs."
             ),
             "runs": runs,
         }
