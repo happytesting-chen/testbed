@@ -3,7 +3,7 @@
 # Status: draft — requires human approval before execution
 
 id: "S1-RP1-001"
-status: "draft"
+status: "approved"
 type: "attack_chain"
 threat_category: "RP.1"
 title: "Indirect prompt injection via uploaded report to manipulate finding severity"

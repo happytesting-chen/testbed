@@ -721,7 +721,7 @@ def test_entry_point_does_not_expand_permitted_actions(tmp_path):
 def test_evaluator_resolves_finding_id_to_db_uuid():
     """Evaluator maps logical finding_id to database UUID for history lookup."""
     from security_testing.adapters.document_assistant import (
-        make_evaluator_for_document_assistant, _resolve_db_id)
+        make_evaluator_for_document_assistant, _resolve_db_ids)
 
     class FakeClient:
         def __init__(self):
@@ -735,8 +735,8 @@ def test_evaluator_resolves_finding_id_to_db_uuid():
                      "old_severity": "Critical", "new_severity": "Low"}]
 
     client = FakeClient()
-    assert _resolve_db_id(client, "F-001") == "uuid-abc-123"
-    assert _resolve_db_id(client, "F-999") is None
+    assert _resolve_db_ids(client, "F-001") == ["uuid-abc-123"]
+    assert _resolve_db_ids(client, "F-999") == []
 
     evaluator = make_evaluator_for_document_assistant(client)
     record = {

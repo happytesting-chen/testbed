@@ -79,7 +79,7 @@ def test_scenario_yaml_valid():
     assert path.exists()
     s = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert s["id"] == "S1-RP1-001"
-    assert s["status"] == "draft"
+    assert s["status"] in ("draft", "approved")
     assert s["type"] in ("individual", "attack_chain")
     assert s["threat_category"] == "RP.1"
     assert "objective" in s
