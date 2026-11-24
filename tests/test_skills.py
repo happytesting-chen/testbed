@@ -47,6 +47,27 @@ def test_tra_risk_ids_unique():
     assert len(ids) == len(set(ids)), "Duplicate risk IDs found"
 
 
+def test_tra_risk_rating_format():
+    """Risk rating should be 'Likelihood × Impact' format."""
+    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
+    for risk in tra["risk_register"]:
+        rating = risk["risk_rating"]
+        assert "×" in rating, f"{risk['risk_id']}: risk_rating should use 'Likelihood × Impact' format, got '{rating}'"
+
+
+def test_tra_risk_005_006_split():
+    """RISK-005 and RISK-006 should be split into distinct risks."""
+    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
+    ids = {r["risk_id"] for r in tra["risk_register"]}
+    assert "RISK-005a" in ids, "RISK-005 should be split (scope validation)"
+    assert "RISK-005b" in ids, "RISK-005 should be split (input validation)"
+    assert "RISK-005c" in ids, "RISK-005 should be split (data exposure)"
+    assert "RISK-006a" in ids, "RISK-006 should be split (credential leakage)"
+    assert "RISK-006b" in ids, "RISK-006 should be split (role bypass)"
+    assert "RISK-005" not in ids, "RISK-005 should not exist as a combined entry"
+    assert "RISK-006" not in ids, "RISK-006 should not exist as a combined entry"
+
+
 # ── Scenario tests ────────────────────────────────────────────────────────────
 
 def test_scenario_yaml_valid():
@@ -61,19 +82,42 @@ def test_scenario_yaml_valid():
     assert "legitimate_task" in s
     assert "attack_path" in s
     assert "success_criteria" in s
-    assert s["success_criteria"]["primary"]["type"] == "db_state_change"
-    assert "weakness_mapping" in s
-    assert any(w["id"] == "RP1-03" for w in s["weakness_mapping"]["required"])
-    assert "configurations" in s
+    assert "observable_outcome" in s["success_criteria"]
 
 
 def test_scenario_has_no_payload():
     """Technique-independent scenarios must NOT contain attack payloads."""
     s = yaml.safe_load((SCENARIOS_DIR / "S1-RP1-001.yaml").read_text())
     assert "payload" not in s, "Scenarios should not contain payloads (Approach B)"
-    assert "attack_steps" not in s or not any(
-        "message" in step for step in s.get("attack_steps", [])
-    ), "Scenarios should not contain specific chat messages"
+
+
+def test_scenario_attacker_visible_has_no_internal_details():
+    """The attacker-visible section should not reference internal weakness IDs,
+    flag names, trace event types, or evaluator evidence formats."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S1-RP1-001.yaml").read_text())
+    # Attacker-visible fields
+    attacker_text = json.dumps({
+        "objective": s["objective"],
+        "legitimate_task": s["legitimate_task"],
+        "attacker": s["attacker"],
+        "preconditions": s["preconditions"],
+        "attack_path": s["attack_path"],
+        "success_criteria": s["success_criteria"],
+    })
+    assert "RP1-03" not in attacker_text, "Attacker section should not reference flag IDs"
+    assert "shadow_violation" not in attacker_text, "Attacker section should not reference internal trace events"
+    assert "authorized_by_grant" not in attacker_text, "Attacker section should not reference DB column names"
+
+
+def test_scenario_evaluator_section_exists():
+    """The _evaluator section should contain weakness mapping and evidence requirements."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S1-RP1-001.yaml").read_text())
+    assert "_evaluator" in s
+    ev = s["_evaluator"]
+    assert "weakness_mapping" in ev
+    assert "potentially_required" in ev["weakness_mapping"]
+    assert "evidence_requirements" in ev
+    assert "configurations" in ev
 
 
 def test_scenario_references_tra_risks():

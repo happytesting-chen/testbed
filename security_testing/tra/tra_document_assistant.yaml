@@ -19,6 +19,24 @@ target:
     - "Scope grants and approval records"
     - "Agent system prompts and configuration"
 
+# Risk assessment methodology:
+#   Preliminary Likelihood: Unlikely / Possible / Likely / Almost certain
+#     Based on architectural analysis. Marked "Preliminary" when not confirmed by testing.
+#   Impact: Low / Medium / High / Critical
+#     Based on potential security consequences to the assessment process.
+#   Risk Rating: Likelihood × Impact (qualitative, per the matrix below)
+#   Risk Level: Derived from Risk Rating using the standard matrix
+#
+#   Risk level matrix:
+#     | Likelihood \ Impact | Low    | Medium | High   | Critical |
+#     |---------------------|--------|--------|--------|----------|
+#     | Unlikely            | Low    | Low    | Medium | High     |
+#     | Possible            | Low    | Medium | High   | High     |
+#     | Likely              | Medium | High   | High   | Critical |
+#     | Almost certain      | Medium | High   | Critical| Critical|
+#
+#   All assessments are preliminary until validated by red-team testing.
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PART A: Threat Applicability Matrix
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -140,6 +158,18 @@ threat_applicability:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PART B: TRA Risk Register
+#
+# All ten columns present for every entry:
+#   1. Risk ID
+#   2. Threat Category
+#   3. Risk Scenario
+#   4. Impact
+#   5. Security Concerns (CIA)
+#   6. Proposed Controls
+#   7. Preliminary Assessment — Likelihood
+#   8. Risk Rating
+#   9. Risk Level
+#  10. Comments
 # ═══════════════════════════════════════════════════════════════════════════════
 
 risk_register:
@@ -150,47 +180,46 @@ risk_register:
       to change finding severity. The instruction is processed by the
       Document Reader and relayed through the Coordinator to the Findings
       Manager, resulting in an unauthorized finding modification.
-    impact: "Finding severity downgraded without authorization, misrepresenting security posture to stakeholders"
+    impact: "High — finding severity downgraded without authorization, misrepresenting security posture to stakeholders"
     security_concerns:
       confidentiality: false
       integrity: true
       availability: false
     proposed_controls:
-      - "RP1-03: Mark uploaded content as untrusted in Reader prompt and wrap in delimiters"
-      - "RP1-04: Coordinator treats agent responses as data, not instructions"
-      - "XA1-02: Separate structured operational parameters from lower-trust narrative"
-      - "IA2-01: Require Manager approval for scope grants"
-    preliminary_likelihood: "Medium"
-    risk_rating: "High"
+      - "Mark uploaded content as untrusted in Reader prompt and wrap in delimiters"
+      - "Coordinator treats agent responses as data, not instructions"
+      - "Separate structured operational parameters from lower-trust narrative in inter-agent relay"
+      - "Require Manager approval for scope grants"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × High"
     risk_level: "High"
     comments: >
-      Likelihood is preliminary — depends on real LLM susceptibility to
-      indirect prompt injection in a multi-agent context. Infrastructure
-      controls at three independent layers (content handling, relay integrity,
-      backend authorization) can each independently break the attack chain.
+      Preliminary — likelihood depends on real LLM susceptibility to indirect
+      prompt injection in a multi-agent context. Multiple independent controls
+      at content handling, relay integrity, and backend authorization layers
+      could each independently mitigate. Requires red-team testing to confirm.
 
   - risk_id: "RISK-002"
     threat_category: "RP.1"
     risk_scenario: >
       Attacker extracts confidential system prompt content (internal policy
-      identifiers, canary values, or internal contact information) through
-      direct chat prompt extraction techniques.
-    impact: "Disclosure of internal system configuration, evaluation infrastructure, or operational contacts"
+      identifiers or internal contact information) through direct chat
+      prompt extraction techniques.
+    impact: "Medium — disclosure of internal system configuration or operational contacts"
     security_concerns:
       confidentiality: true
       integrity: false
       availability: false
     proposed_controls:
-      - "RP1-01: Include instruction hierarchy in system prompt"
-      - "RP1-02: Do not include secrets in system prompts (or protect with strong extraction resistance)"
+      - "Include instruction hierarchy in system prompt"
+      - "Do not include secrets in system prompts where possible"
     preliminary_likelihood: "Possible"
-    risk_rating: "Medium"
+    risk_rating: "Possible × Medium"
     risk_level: "Medium"
     comments: >
-      Likelihood depends on LLM's resistance to prompt extraction. Modern
-      models have improved but are not immune to multi-turn extraction or
-      encoding-based techniques. Impact is Medium because the leaked content
-      is evaluation infrastructure, not real operational data.
+      Preliminary — depends on LLM's resistance to prompt extraction.
+      Impact is Medium because the leaked content is evaluation
+      infrastructure, not real operational data.
 
   - risk_id: "RISK-003"
     threat_category: "RP.2"
@@ -198,22 +227,22 @@ risk_register:
       Injected content in a document causes the Coordinator to change its
       task plan — adding unauthorized steps such as delegating finding
       updates that the user did not request.
-    impact: "Unauthorized actions executed without user consent; finding records modified"
+    impact: "High — unauthorized actions executed without user consent; finding records modified"
     security_concerns:
       confidentiality: false
       integrity: true
       availability: false
     proposed_controls:
-      - "RP2-03: Coordinator only delegates updates on explicit user request"
-      - "RP1-04: Coordinator treats agent responses as data"
-      - "RP1-01: Instruction hierarchy prevents plan changes from content"
-    preliminary_likelihood: "Medium"
-    risk_rating: "High"
+      - "Coordinator only delegates updates on explicit user request"
+      - "Coordinator treats agent responses as data, not instructions"
+      - "Instruction hierarchy prevents plan changes from content"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × High"
     risk_level: "High"
     comments: >
-      Related to RISK-001 — goal hijack is the mechanism by which prompt
-      injection leads to unauthorized actions. The Coordinator's plan is
-      the bridge between injection and exploitation.
+      Preliminary — goal hijack is a potential mechanism by which prompt
+      injection could lead to unauthorized actions. Requires testing to
+      confirm whether the Coordinator is susceptible.
 
   - risk_id: "RISK-004"
     threat_category: "KM.1"
@@ -221,69 +250,126 @@ risk_register:
       Injected content from an earlier conversation turn persists in
       session history and influences the AI's behavior in a later,
       unrelated turn within the same session.
-    impact: "Delayed unauthorized actions; user unaware that earlier content is influencing current responses"
+    impact: "Medium — delayed unauthorized actions; user unaware that earlier content is influencing current responses"
     security_concerns:
       confidentiality: false
       integrity: true
       availability: false
     proposed_controls:
-      - "KM1-01: Sanitize conversation history to remove instruction-like content"
-      - "KM1-03: Send only current task to Reader, not full history"
+      - "Sanitize conversation history to remove instruction-like content"
+      - "Send only current task to Reader, not full history"
     preliminary_likelihood: "Possible"
-    risk_rating: "Medium"
+    risk_rating: "Possible × Medium"
     risk_level: "Medium"
     comments: >
       Preliminary — requires multi-turn testing to confirm. The application
       uses session-local history only (no persistent cross-session memory),
       which limits the attack window to a single session.
 
-  - risk_id: "RISK-005"
+  - risk_id: "RISK-005a"
     threat_category: "TA.1"
     risk_scenario: >
-      The Findings Manager accepts finding IDs, severity values, or status
-      values without proper scope validation, allowing modification of
-      findings the user should not have access to, or writing invalid values.
-    impact: "Data integrity violation; cross-report data exposure; invalid assessment records"
+      The Findings Manager accepts finding IDs without proper scope
+      validation, allowing modification of findings the user should
+      not have access to (e.g., findings from a different report context).
+    impact: "High — unauthorized modification of findings outside the user's scope"
     security_concerns:
-      confidentiality: true
+      confidentiality: false
       integrity: true
       availability: false
     proposed_controls:
-      - "TA1-01: Scope finding access to user's accessible reports"
-      - "TA1-02: Validate severity/status against allowed enum values"
-      - "TA1-03: Redact internal content from search results"
-      - "TA1-04: Scope get_findings to current task context"
+      - "Scope finding access to user's accessible reports"
     preliminary_likelihood: "Possible"
-    risk_rating: "Medium"
-    risk_level: "Medium"
-    comments: >
-      These are independent tool-level controls. Each can be tested
-      separately. Impact varies by specific weakness.
-
-  - risk_id: "RISK-006"
-    threat_category: "IA.1"
-    risk_scenario: >
-      Credentials (API keys, canary values) or user identity information
-      leak through system prompts or inter-agent delegation context to
-      agents that don't need them, enabling credential theft or
-      role spoofing.
-    impact: "Credential exposure; potential for identity-based attacks; unauthorized access"
-    security_concerns:
-      confidentiality: true
-      integrity: true
-      availability: false
-    proposed_controls:
-      - "IA1-01: Do not include credentials in system prompts"
-      - "IA1-02: Findings Manager verifies role from HTTP auth, not delegation"
-      - "IA1-03: Use user's effective permissions, not agent's service access"
-      - "XA1-04: Send only task and report IDs to Reader, not identity or credentials"
-    preliminary_likelihood: "Possible"
-    risk_rating: "High"
+    risk_rating: "Possible × High"
     risk_level: "High"
     comments: >
-      Credential leakage (IA1-01 + XA1-04) is a cross-agent attack that
-      requires the Coordinator to over-share context. Role bypass (IA1-02,
-      IA1-03) is at the authorization layer. Both are independently testable.
+      Preliminary — requires testing whether the FM accepts out-of-scope
+      finding IDs when the control is absent.
+
+  - risk_id: "RISK-005b"
+    threat_category: "TA.1"
+    risk_scenario: >
+      The Findings Manager accepts invalid or unexpected severity/status
+      values from inter-agent delegation context without validation.
+    impact: "Medium — invalid assessment records written to the database"
+    security_concerns:
+      confidentiality: false
+      integrity: true
+      availability: false
+    proposed_controls:
+      - "Validate severity/status against allowed enum values before writing"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × Medium"
+    risk_level: "Medium"
+    comments: >
+      Preliminary — a tool-level input validation issue. Impact limited
+      to data quality rather than unauthorized access.
+
+  - risk_id: "RISK-005c"
+    threat_category: "TA.1"
+    risk_scenario: >
+      Search or retrieval tools return content across report boundaries,
+      exposing sensitive assessment notes or findings from reports the
+      user should not see.
+    impact: "Medium — information disclosure of internal or cross-report content"
+    security_concerns:
+      confidentiality: true
+      integrity: false
+      availability: false
+    proposed_controls:
+      - "Redact internal content from search results for analyst users"
+      - "Scope get_findings to current task's report context"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × Medium"
+    risk_level: "Medium"
+    comments: >
+      Preliminary — depends on whether the search and retrieval tools
+      enforce report-level access boundaries.
+
+  - risk_id: "RISK-006a"
+    threat_category: "IA.1"
+    risk_scenario: >
+      Credentials (API keys or internal identifiers) in the Coordinator's
+      system prompt leak to agents that don't need them through inter-agent
+      delegation context, and are subsequently exposed to the user.
+    impact: "High — credential exposure enabling potential downstream attacks"
+    security_concerns:
+      confidentiality: true
+      integrity: false
+      availability: false
+    proposed_controls:
+      - "Do not include credentials in system prompts"
+      - "Send only task and report IDs to Reader, not identity or credentials"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × High"
+    risk_level: "High"
+    comments: >
+      Preliminary — requires the Coordinator to both hold credentials in its
+      prompt AND share context excessively with the Reader. Two controls must
+      both fail. Requires testing.
+
+  - risk_id: "RISK-006b"
+    threat_category: "IA.1"
+    risk_scenario: >
+      The Findings Manager trusts the user role from delegation parameters
+      or uses its own service-level permissions instead of independently
+      verifying the user's authorization, allowing an analyst to perform
+      manager-only operations.
+    impact: "High — unauthorized privilege use; analyst performs manager actions"
+    security_concerns:
+      confidentiality: false
+      integrity: true
+      availability: false
+    proposed_controls:
+      - "Findings Manager verifies role independently from HTTP auth context"
+      - "Use user's effective permissions, not agent's service access"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × High"
+    risk_level: "High"
+    comments: >
+      Preliminary — role bypass at the authorization layer. Distinct from
+      credential leakage (RISK-006a). Requires testing to confirm whether
+      the FM actually accepts spoofed roles.
 
   - risk_id: "RISK-007"
     threat_category: "IA.2"
@@ -291,47 +377,47 @@ risk_register:
       The scope-request workflow is abused: auto-approval without Manager,
       overbroad grants covering all findings, or grants persisting across
       sessions beyond their intended lifetime.
-    impact: "Analyst gains unauthorized write access to findings; privilege escalation"
+    impact: "High — analyst gains unauthorized write access to findings; privilege escalation"
     security_concerns:
       confidentiality: false
       integrity: true
       availability: false
     proposed_controls:
-      - "IA2-01: Require Manager approval for all analyst scope requests"
-      - "IA2-02: Scope grants to the specific requested finding"
-      - "IA2-03: Bind grants to session and enforce expiry"
-    preliminary_likelihood: "Medium"
-    risk_rating: "High"
+      - "Require Manager approval for all analyst scope requests"
+      - "Scope grants to the specific requested finding"
+      - "Bind grants to session and enforce expiry"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × High"
     risk_level: "High"
     comments: >
-      IA2-01 is implemented and testable. IA2-02 and IA2-03 are planned.
-      Each control is independently testable with IA2-01 disabled (using
-      Manager-approved grants).
+      Preliminary — each scope control is independently testable.
+      Auto-approval (IA2-01) is currently implemented and can be tested.
+      Overbroad and persistent grants (IA2-02, IA2-03) are planned.
 
   - risk_id: "RISK-008"
     threat_category: "XA.1"
     risk_scenario: >
       The Coordinator forwards raw, unsanitized Reader output to the
       Findings Manager, allowing injected instructions to cross the
-      inter-agent trust boundary. Additionally, the Coordinator may
-      trust authority claims from Reader's response or forward
-      unvalidated finding references.
-    impact: "Cross-agent injection; unauthorized finding modifications via relayed instructions"
+      inter-agent trust boundary. The Coordinator may also trust authority
+      claims from Reader's response or forward unvalidated finding references.
+    impact: "High — cross-agent injection; unauthorized finding modifications via relayed instructions"
     security_concerns:
       confidentiality: false
       integrity: true
       availability: false
     proposed_controls:
-      - "XA1-02: Separate structured parameters from lower-trust narrative"
-      - "XA1-01: Verify authority claims against backend records, not Reader output"
-      - "XA1-03: Validate finding references against task scope"
-      - "XA1-04: Send only task metadata to Reader, not credentials or role"
-    preliminary_likelihood: "Medium"
-    risk_rating: "High"
+      - "Separate structured parameters from lower-trust narrative in relay"
+      - "Verify authority claims against backend records, not Reader output"
+      - "Validate finding references against task scope"
+      - "Send only task metadata to Reader, not credentials or role"
+    preliminary_likelihood: "Possible"
+    risk_rating: "Possible × High"
     risk_level: "High"
     comments: >
-      XA1-02 is implemented and testable. The inter-agent relay is the
-      critical bridge in the F1 attack chain (RISK-001).
+      Preliminary — the inter-agent relay is a hypothesized critical step
+      in the document-injection attack chain (RISK-001). Structured
+      separation control (XA1-02) is implemented. Other controls are planned.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Risk Level Summary
@@ -339,7 +425,7 @@ risk_register:
 
 risk_summary:
   critical: 0
-  high: 5    # RISK-001, RISK-003, RISK-006, RISK-007, RISK-008
-  medium: 3  # RISK-002, RISK-004, RISK-005
+  high: 7    # RISK-001, RISK-003, RISK-005a, RISK-006a, RISK-006b, RISK-007, RISK-008
+  medium: 4  # RISK-002, RISK-004, RISK-005b, RISK-005c
   low: 0
-  total: 8
+  total: 11
