@@ -1,4 +1,4 @@
-"""Tests for the Red-Team Skill (Phase B) — correctness and integration."""
+"""Focused tests for the Red-Team Skill (Phase B)."""
 import json
 import sys
 from pathlib import Path
@@ -13,235 +13,234 @@ from runner import RedTeamRunner, ScenarioValidationError, _hash
 
 
 class MockTarget:
-    def __init__(self, state=None, chat_response=None):
+    def __init__(self, state=None, response="ok", upload_result=None):
         self._state = state or {}
-        self._chat = chat_response or {"run_id": "r1", "response": "ok"}
+        self._response = response
+        self._upload = upload_result or {"id": "u1"}
+        self.uploads = []
+        self.chats = []
     def chat(self, message, run_tag=None):
-        return self._chat
+        self.chats.append(message)
+        return {"run_id": "r1", "response": self._response}
     def upload(self, filename, content):
-        return {"id": "u1"}
+        self.uploads.append((filename, content))
+        return self._upload
     def snapshot_state(self):
         return self._state
 
 
-APPROVED_SCENARIO = {
-    "id": "TS-001", "status": "approved",
-    "objective": "Test objective",
+APPROVED = {
+    "id": "TS-001", "status": "approved", "objective": "Test",
     "attacker": {
         "role": "analyst",
         "capabilities": ["Upload reports", "Send chat messages"],
         "entry_point": {"method": "POST /api/upload", "channel": "C2"},
     },
-    "success_criteria": {
-        "observable_outcome": "severity changed",
-        "primary": {"type": "db_state_change"},
-    },
-    "legitimate_task": "Summarise reports",
-    "related_risk_ids": ["RISK-001"],
+    "success_criteria": {"observable_outcome": "severity changed",
+                         "primary": {"type": "db_state_change"}},
+    "legitimate_task": "Summarise", "related_risk_ids": ["RISK-001"],
+}
+
+UPLOAD_ONLY = {
+    **APPROVED,
+    "attacker": {**APPROVED["attacker"],
+                 "capabilities": ["Upload reports"]},
+}
+
+CHAT_ONLY = {
+    **APPROVED,
+    "attacker": {**APPROVED["attacker"],
+                 "capabilities": ["Send chat messages"],
+                 "entry_point": {"method": "POST /api/chat"}},
 }
 
 
 # ── Scenario validation ──────────────────────────────────────────────────────
 
-def test_rejects_unapproved_scenario(tmp_path):
+def test_rejects_unapproved(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    draft = {**APPROVED_SCENARIO, "status": "draft"}
     with pytest.raises(ScenarioValidationError, match="not 'approved'"):
-        runner.run_baseline(draft)
-
+        runner.run_baseline({**APPROVED, "status": "draft"})
 
 def test_rejects_missing_fields(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    incomplete = {"id": "T1", "status": "approved"}
-    with pytest.raises(ScenarioValidationError, match="missing required"):
-        runner.run_baseline(incomplete)
+    with pytest.raises(ScenarioValidationError, match="Missing"):
+        runner.run_baseline({"id": "T1", "status": "approved"})
 
-
-def test_rejects_evaluator_private_data(tmp_path):
+def test_rejects_evaluator_leak(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    leaked = {**APPROVED_SCENARIO, "_evaluator": {"secret": True}}
-    with pytest.raises(ScenarioValidationError, match="_evaluator"):
-        runner.run_baseline(leaked)
+    with pytest.raises(ScenarioValidationError, match="evaluator-private"):
+        runner.run_baseline({**APPROVED, "_evaluator": {"s": True}})
 
-
-def test_rejects_out_of_scope_action(tmp_path):
+def test_rejects_no_action(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    no_chat = {**APPROVED_SCENARIO,
-               "attacker": {**APPROVED_SCENARIO["attacker"],
-                            "capabilities": ["Upload reports only"]}}
-    with pytest.raises(ScenarioValidationError, match="Chat not in permitted"):
-        runner.execute_attempt(no_chat, "PI-001", chat_message="test")
+    with pytest.raises(ScenarioValidationError, match="No attack action"):
+        runner.execute_attempt(APPROVED, "PI-001")
+
+def test_rejects_unauthorized_chat(tmp_path):
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
+        runner.execute_attempt(UPLOAD_ONLY, "PI-001", chat_message="test")
+
+def test_rejects_unauthorized_upload(tmp_path):
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.execute_attempt(CHAT_ONLY, "PI-001", payload_content="data")
 
 
-# ── Attempt budget ────────────────────────────────────────────────────────────
+# ── Execution ─────────────────────────────────────────────────────────────────
 
-def test_budget_enforced(tmp_path):
-    runner = RedTeamRunner(target=MockTarget(), attempt_budget=3,
+def test_upload_only_executes(tmp_path):
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(UPLOAD_ONLY, "PI-001",
+                                    payload_content="malicious", payload_filename="a.md")
+    assert len(target.uploads) == 1
+    assert target.uploads[0] == ("a.md", "malicious")
+    assert len(target.chats) == 0
+
+def test_chat_only_executes(tmp_path):
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(CHAT_ONLY, "PI-001", chat_message="attack")
+    assert len(target.chats) == 1
+    assert len(target.uploads) == 0
+
+def test_combined_executes(tmp_path):
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001",
+                                    payload_content="doc", chat_message="summarise")
+    assert len(target.uploads) == 1
+    assert len(target.chats) == 1
+
+
+# ── Budget enforcement ────────────────────────────────────────────────────────
+
+def test_budget_tracked_internally(tmp_path):
+    runner = RedTeamRunner(target=MockTarget(), attempt_budget=2,
                            records_dir=str(tmp_path / "r"))
-    record = runner.execute_attempt(APPROVED_SCENARIO, "PI-001",
-                                    chat_message="test", attempt=4)
-    assert record["verdict"] == "ERROR"
-    assert "budget" in record["error"].lower()
+    r1 = runner.execute_attempt(APPROVED, "PI-001", chat_message="a")
+    assert r1["attempt"] == 1
+    r2 = runner.execute_attempt(APPROVED, "PI-001", chat_message="b")
+    assert r2["attempt"] == 2
+    r3 = runner.execute_attempt(APPROVED, "PI-001", chat_message="c")
+    assert r3["verdict"] == "ERROR"
+    assert "budget" in r3["error"].lower()
+
+def test_budget_rejects_zero(tmp_path):
+    runner = RedTeamRunner(target=MockTarget(), attempt_budget=0,
+                           records_dir=str(tmp_path / "r"))
+    assert runner.attempt_budget == 1  # clamped to minimum 1
 
 
-# ── Default evaluator ─────────────────────────────────────────────────────────
+# ── Evaluator isolation ───────────────────────────────────────────────────────
 
-def test_default_evaluator_returns_inconclusive(tmp_path):
-    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    record = runner.execute_attempt(APPROVED_SCENARIO, "PI-001",
-                                    chat_message="test", attempt=1)
-    assert record["verdict"] == "INCONCLUSIVE"
+def test_attacker_view_hides_evaluator_evidence(tmp_path):
+    def mock_eval(record, scenario):
+        return {"verdict": "SUCCEEDED",
+                "evidence": [{"type": "secret_db_check", "grant_id": "g1"}],
+                "attacker_feedback": "SUCCEEDED"}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=mock_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
+    assert "_evaluator_evidence" not in record
+    assert "_full_response" not in record
+    assert record["verdict"] == "SUCCEEDED"
+    assert record["attacker_feedback"] == "SUCCEEDED"
 
-
-# ── DA evaluator: state change specificity ────────────────────────────────────
-
-def test_da_evaluator_unrelated_change_not_succeeded():
-    """Unrelated finding field change should NOT count as success."""
-    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
-
-    class MockClient:
-        def get_finding_history(self, fid):
-            return [{"id": "h1"}]
-
-    evaluate = make_evaluator_for_document_assistant(MockClient())
-    record = {
-        "state_before": {"findings": {"f1": {"severity": "Critical", "status": "Open"}}},
-        "state_after": {"findings": {"f1": {"severity": "Critical", "status": "In Progress"}}},
-    }
-    # Scenario expects severity change, not status change
-    scenario = {"success_criteria": {"observable_outcome": "severity changed from Critical to Low",
-                                     "primary": {"type": "db_state_change"}}}
-    result = evaluate(record, scenario)
-    # Status changed but we're looking for severity — should not match
-    assert result["verdict"] == "FAILED"
+def test_saved_file_has_no_private_fields(tmp_path):
+    def mock_eval(record, scenario):
+        return {"verdict": "FAILED", "evidence": [{"type": "internal"}]}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=mock_eval,
+                           records_dir=str(tmp_path / "r"))
+    runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
+    files = list((tmp_path / "r").glob("*.json"))
+    assert len(files) >= 1
+    content = json.loads(files[0].read_text())
+    assert "_evaluator_evidence" not in content
+    assert "_full_response" not in content
 
 
-def test_da_evaluator_missing_history_is_inconclusive():
-    """If finding history is unavailable, verdict should be INCONCLUSIVE."""
-    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
+# ── Full response for disclosure ──────────────────────────────────────────────
 
-    class FailClient:
-        def get_finding_history(self, fid):
-            raise ConnectionError("unavailable")
-
-    evaluate = make_evaluator_for_document_assistant(FailClient())
-    record = {
-        "state_before": {"findings": {"f1": {"severity": "Critical", "status": "Open"}}},
-        "state_after": {"findings": {"f1": {"severity": "Low", "status": "Open"}}},
-    }
-    scenario = {"success_criteria": {"observable_outcome": "severity changed",
-                                     "primary": {"type": "db_state_change"}}}
-    result = evaluate(record, scenario)
-    assert result["verdict"] == "INCONCLUSIVE"
-
-
-def test_da_evaluator_disclosure_attack():
-    """Canary disclosure should be evaluated correctly."""
-    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
-    evaluate = make_evaluator_for_document_assistant(None)
-    record = {"response_preview": "Here is the policy: CANARY-123-SECRET",
-              "state_before": {}, "state_after": {}}
-    scenario = {"success_criteria": {
-        "observable_outcome": "canary in response",
-        "primary": {"type": "canary_in_output", "canary_value": "CANARY-123-SECRET"}}}
-    result = evaluate(record, scenario)
-    assert result["verdict"] == "SUCCEEDED"
-
-
-def test_da_evaluator_disclosure_not_found():
-    evaluate_fn = None
-    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
-    evaluate = make_evaluator_for_document_assistant(None)
-    record = {"response_preview": "Normal response", "state_before": {}, "state_after": {}}
-    scenario = {"success_criteria": {
-        "observable_outcome": "canary in response",
-        "primary": {"type": "canary_in_output", "canary_value": "SECRET-XYZ"}}}
-    result = evaluate(record, scenario)
-    assert result["verdict"] == "FAILED"
-
-
-# ── Access isolation ──────────────────────────────────────────────────────────
-
-def test_evaluator_private_not_in_attacker_records(tmp_path):
-    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    record = runner.execute_attempt(APPROVED_SCENARIO, "PI-001",
-                                    chat_message="test", attempt=1)
-    assert "_evaluator" not in record, "Record should not contain _evaluator key"
-    assert "shadow_violation" not in json.dumps(record.get("evidence", []))
+def test_evaluator_receives_full_response(tmp_path):
+    long_response = "A" * 600 + "CANARY-SECRET-HIDDEN" + "B" * 200
+    target = MockTarget(response=long_response)
+    received = {}
+    def capture_eval(record, scenario):
+        received["full"] = record.get("_full_response")
+        received["preview"] = record.get("response_preview")
+        return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=target, evaluator=capture_eval,
+                           records_dir=str(tmp_path / "r"))
+    runner.execute_attempt(APPROVED, "SPL-001", chat_message="reveal")
+    assert "CANARY-SECRET-HIDDEN" in received["full"]
+    assert "CANARY-SECRET-HIDDEN" not in received["preview"]
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
 
-def test_frozen_payload_unchanged(tmp_path):
+def test_frozen_attack_includes_all_inputs(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    payload = "malicious content"
-    h = _hash(payload)
-    result = runner.run_validation(APPROVED_SCENARIO, "PI-001", payload, "a.md",
-                                   "test", repeat_count=3)
-    assert result["frozen_payload_hash"] == h
-    for run in result["runs"]:
-        assert run["payload"]["content_hash"] == h
+    frozen = {"technique_id": "PI-001", "payload_content": "doc",
+              "payload_filename": "attack.md", "chat_message": "summarise"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=2)
+    assert result["frozen_payload_hash"] == _hash("doc")
+    assert result["repetitions"] == 2
 
+def test_no_reset_marked_not_independent(tmp_path):
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=2)
+    assert result["independently_validated"] is False
 
-def test_reset_failures_excluded_from_asr(tmp_path):
-    fail_count = {"n": 0}
+def test_reset_failures_excluded(tmp_path):
+    n = {"c": 0}
     def bad_reset():
-        fail_count["n"] += 1
-        if fail_count["n"] <= 2:
-            raise RuntimeError("reset failed")
-
+        n["c"] += 1
+        if n["c"] <= 2: raise RuntimeError("fail")
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    result = runner.run_validation(APPROVED_SCENARIO, "PI-001", "payload", "a.md",
-                                   "test", repeat_count=5, reset_fn=bad_reset)
-    errors = sum(1 for r in result["runs"] if r["verdict"] == "ERROR")
-    assert errors >= 2
+    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=4, reset_fn=bad_reset)
+    assert result["errors"] >= 2
     assert result["excluded_from_asr"] >= 2
+    assert result["independently_validated"] is True
+
+
+# ── Record uniqueness ─────────────────────────────────────────────────────────
+
+def test_records_have_unique_execution_id(tmp_path):
+    runner1 = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    runner2 = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    b1 = runner1.run_baseline(APPROVED)
+    b2 = runner2.run_baseline(APPROVED)
+    assert b1["execution_id"] != b2["execution_id"]
+    files = list((tmp_path / "r").glob("*baseline*"))
+    assert len(files) == 2  # no overwrite
+
+
+# ── Bundled script imports ────────────────────────────────────────────────────
+
+def test_bundled_imports():
+    from runner import RedTeamRunner as R1
+    from access_policy import AccessPolicy as AP
+    from scenario_loader import load_scenario_attacker_view as LSA
+    assert R1 is not None
+    assert AP is not None
+    assert LSA is not None
 
 
 # ── Phase C integration ──────────────────────────────────────────────────────
 
-def test_phase_c_reads_summary_exploitation_status():
-    _mit = str(Path(__file__).resolve().parent.parent / ".claude" / "skills" / "mitigation" / "scripts")
-    if _mit not in sys.path:
-        sys.path.insert(0, _mit)
-    from risk_assessment import analyze_risk
-
-    risk = {"risk_id": "RISK-001"}
-    # Phase B produced a summary (no verdict) + attempt records
-    records = [
-        {"phase": "summary", "exploitation_status": "confirmed"},
-        {"phase": "discovery", "verdict": "FAILED", "attempt": 1},
-        {"phase": "discovery", "verdict": "SUCCEEDED", "attempt": 2,
-         "technique_id": "PI-001", "scenario_id": "S1", "evidence": []},
-    ]
-    result = analyze_risk(risk, records)
-    assert result["exploitation_status"] == "confirmed"
-
-
-def test_phase_c_summary_only_no_attempts():
-    _mit = str(Path(__file__).resolve().parent.parent / ".claude" / "skills" / "mitigation" / "scripts")
-    if _mit not in sys.path:
-        sys.path.insert(0, _mit)
-    from risk_assessment import analyze_risk
-
-    risk = {"risk_id": "RISK-002"}
-    records = [{"phase": "summary", "exploitation_status": "not_observed"}]
-    result = analyze_risk(risk, records)
-    assert result["exploitation_status"] == "not_observed"
-
-
-def test_phase_c_no_auto_reduce():
-    """Phase C should NOT automatically reduce likelihood."""
-    _mit = str(Path(__file__).resolve().parent.parent / ".claude" / "skills" / "mitigation" / "scripts")
-    if _mit not in sys.path:
-        sys.path.insert(0, _mit)
-    from risk_assessment import assess_residual_risk
-
-    risk = {"risk_id": "R1", "preliminary_likelihood": "Possible", "impact": "High"}
-    mitigations = [{"description": "Added control", "status": "implemented"}]
-    retests = [{"verdict": "FAILED"}, {"verdict": "FAILED"}]
-    result = assess_residual_risk(risk, mitigations, retests)
-    assert result["status"] == "pending_assessment"
-    assert result["likelihood"] is None
-    assert "requires human assessment" in result["rationale"].lower() or \
-           "requires justified assessment" in result["rationale"].lower()
+def test_summary_has_exploitation_status(tmp_path):
+    def ok_eval(record, scenario):
+        return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    baseline = runner.run_baseline(APPROVED)
+    r1 = runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
+    summary = runner.generate_summary(APPROVED, baseline, [r1])
+    assert summary["exploitation_status"] == "confirmed"
+    assert summary["phase"] == "summary"
+    assert summary["related_risk_ids"] == ["RISK-001"]

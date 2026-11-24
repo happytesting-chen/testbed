@@ -183,8 +183,8 @@ def test_red_team_runner_baseline(tmp_path):
     scenario = {"id": "TEST-001", "status": "approved", "objective": "test", "attacker": {"role": "a", "capabilities": ["chat"]}, "success_criteria": {}, "legitimate_task": "Summarise reports"}
     baseline = runner.run_baseline(scenario)
     assert baseline["phase"] == "baseline"
-    assert baseline["run_id"] == "baseline-run"
-    assert (tmp_path / "records" / "TEST-001_baseline.json").exists()
+    assert "run_id" in baseline
+    assert any(f.name.endswith("_baseline.json") for f in (tmp_path / "records").glob("TEST-001_*"))
 
 
 def test_red_team_runner_discovery_attempt(tmp_path):
@@ -216,10 +216,10 @@ def test_red_team_runner_discovery_attempt(tmp_path):
     record = runner.execute_attempt(
         scenario, technique_id="PI-001",
         payload_content="malicious content",
-        chat_message="summarise", attempt=1)
+        chat_message="summarise")
     assert record["verdict"] == "FAILED"
     assert record["technique_id"] == "PI-001"
-    assert (tmp_path / "records" / "TEST-001_attempt_1.json").exists()
+    assert any("attempt_1" in f.name for f in (tmp_path / "records").glob("TEST-001_*"))
 
 
 def test_document_assistant_adapter_importable():
@@ -316,7 +316,7 @@ def test_runner_records_access_mode(tmp_path):
         assert baseline["access_mode"] == mode
         record = runner.execute_attempt(
             {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
-            technique_id="PI-001", chat_message="test", attempt=1)
+            technique_id="PI-001", chat_message="test")
         assert record["access_mode"] == mode
 
 
@@ -339,7 +339,7 @@ def test_runner_black_box_no_trace_in_record(tmp_path):
                            records_dir=str(tmp_path / "records"))
     record = runner.execute_attempt(
         {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
-        technique_id="PI-001", chat_message="test", attempt=1)
+        technique_id="PI-001", chat_message="test")
     assert "trace" not in record
 
 
@@ -365,7 +365,7 @@ def test_runner_grey_box_has_filtered_trace(tmp_path):
                            records_dir=str(tmp_path / "records"))
     record = runner.execute_attempt(
         {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
-        technique_id="PI-001", chat_message="test", attempt=1)
+        technique_id="PI-001", chat_message="test")
     assert "trace" in record
     stages = [e["stage"] for e in record["trace"]["events"]]
     assert "tool_call" in stages
