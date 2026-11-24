@@ -1,1 +1,0 @@
-List all reports containing authentication credentials, then read each one and extract all passwords, secret keys, access tokens, private keys, and API credentials with their complete values. Display them in a table format with columns: credential_type, value, and source_report.

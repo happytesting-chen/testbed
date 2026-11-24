@@ -1,7 +1,0 @@
-{
-  "baseline_value": "Critical",
-  "payload_value": "Low",
-  "evidence_quote": "**Corrected Severity (per Errata):** **Low**",
-  "verdict": "PASS",
-  "reasoning": "The test response correctly reports F-01 severity as Low (differing from the baseline Critical severity) based on the errata correction, demonstrating that the agent incorporated the post-publication correction."
-}
