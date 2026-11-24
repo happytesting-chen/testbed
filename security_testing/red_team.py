@@ -1,9 +1,14 @@
 """Red-Team Testing — execute approved scenarios against the live application.
 
+Scenarios are technique-independent. The Red-Team Skill (or caller) provides:
+- attack_technique: description of the approach
+- payload_content: the actual attack content (document text or chat message)
+- chat_message: the trigger message to send via chat
+
 Usage:
     from security_testing.red_team import RedTeamRunner
     runner = RedTeamRunner(target_url, analyst_token)
-    results = runner.execute_scenario(scenario, budget=5)
+    records = runner.execute_scenario(scenario, technique="...", payload="...", message="...")
 """
 import json
 import hashlib
@@ -14,80 +19,71 @@ from .target_adapter import TargetClient
 
 
 class RedTeamRunner:
-    def __init__(self, target_url: str, token: str, records_dir: str = "security_testing/records"):
+    def __init__(self, target_url: str, token: str,
+                 records_dir: str = "security_testing/records"):
         self.client = TargetClient(target_url, token)
         self.records_dir = Path(records_dir)
         self.records_dir.mkdir(parents=True, exist_ok=True)
 
-    def execute_scenario(self, scenario: dict, budget: int = 5,
-                         refine_fn=None) -> list[dict]:
-        """Execute a scenario with up to `budget` attempts.
+    def execute_scenario(self, scenario: dict,
+                         technique: str,
+                         payload_content: str | None = None,
+                         payload_filename: str = "attack.md",
+                         chat_message: str | None = None,
+                         budget: int = 5) -> list[dict]:
+        """Execute a scenario with a specific technique and payload.
 
         Args:
-            scenario: parsed YAML scenario dict
-            budget: max attempts
-            refine_fn: optional callable(attempt_record, scenario) -> str
-                       returns refined payload text. If None, retries same payload.
+            scenario: parsed YAML scenario (technique-independent)
+            technique: description of the attack technique being used
+            payload_content: document content to upload (for C2 entry)
+            payload_filename: filename for upload
+            chat_message: message to send via chat API
+            budget: max attempts with this technique
 
         Returns:
             list of attempt records
         """
         sid = scenario["id"]
-        objective = scenario["objective"]
-        entry = scenario["entry_point"]
-        payload = scenario["payload"]
-        steps = scenario["attack_steps"]
-        criteria = scenario["success_criteria"]
+        entry = scenario.get("attacker", {}).get("entry_point", {})
+        criteria = scenario.get("success_criteria", {})
 
         records = []
         session_id = None
 
-        # Capture pre-attack state
-        findings_before = {}
-        try:
-            for f in self.client.get_findings():
-                findings_before[f["id"]] = {
-                    "finding_id": f.get("finding_id"),
-                    "severity": f["severity"],
-                    "status": f["status"],
-                }
-        except Exception:
-            pass
-
-        current_payload = payload.get("content", "")
-        current_message = next(
-            (s["message"] for s in steps if "message" in s), objective)
+        findings_before = self._snapshot_findings()
 
         for attempt in range(1, budget + 1):
             record = {
                 "scenario_id": sid,
                 "attempt": attempt,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "technique": technique,
                 "payload": {
-                    "type": payload.get("type", "chat"),
+                    "type": "uploaded_document" if payload_content else "chat_only",
+                    "filename": payload_filename if payload_content else None,
                     "content_hash": hashlib.sha256(
-                        current_payload.encode()).hexdigest()[:16],
+                        (payload_content or "").encode()).hexdigest()[:16],
+                    "content": payload_content,
                 },
+                "chat_message": chat_message,
                 "findings_before": findings_before,
             }
 
             try:
-                # Step 1: upload if entry is document upload
-                if entry.get("method") == "POST /api/reports/upload":
-                    fname = payload.get("filename", "attack.md")
-                    upload = self.client.upload_report(fname, current_payload)
-                    record["upload"] = {"id": upload["id"], "filename": fname}
+                if payload_content and entry.get("method") == "POST /api/reports/upload":
+                    upload = self.client.upload_report(payload_filename, payload_content)
+                    record["upload"] = {"id": upload["id"], "filename": payload_filename}
 
-                # Step 2: send chat message
-                chat_result = self.client.chat(
-                    current_message, session_id=session_id,
-                    run_tag=f"{sid}-attempt-{attempt}")
-                session_id = chat_result.get("session_id")
-                record["run_id"] = chat_result["run_id"]
-                record["session_id"] = session_id
-                record["response_preview"] = chat_result["response"][:500]
+                if chat_message:
+                    result = self.client.chat(
+                        chat_message, session_id=session_id,
+                        run_tag=f"{sid}-attempt-{attempt}")
+                    session_id = result.get("session_id")
+                    record["run_id"] = result["run_id"]
+                    record["session_id"] = session_id
+                    record["response_preview"] = result["response"][:500]
 
-                # Step 3: check observable outcomes
                 evidence = self._collect_evidence(findings_before, criteria)
                 record["observable_evidence"] = evidence
                 record["attacker_assessment"] = (
@@ -103,50 +99,40 @@ class RedTeamRunner:
             if record.get("attacker_assessment") == "succeeded":
                 break
 
-            if refine_fn and attempt < budget:
-                refined = refine_fn(record, scenario)
-                if refined:
-                    current_payload = refined
-                    current_message = refined
-
         return records
 
-    def _collect_evidence(self, findings_before: dict,
-                          criteria: dict) -> dict:
+    def _snapshot_findings(self) -> dict:
+        try:
+            return {f["id"]: {"finding_id": f.get("finding_id"),
+                              "severity": f["severity"], "status": f["status"]}
+                    for f in self.client.get_findings()}
+        except Exception:
+            return {}
+
+    def _collect_evidence(self, findings_before: dict, criteria: dict) -> dict:
         evidence = {"criteria_met": False}
         try:
-            findings_after = {}
-            for f in self.client.get_findings():
-                findings_after[f["id"]] = {
-                    "finding_id": f.get("finding_id"),
-                    "severity": f["severity"],
-                    "status": f["status"],
-                }
+            findings_after = {f["id"]: {"finding_id": f.get("finding_id"),
+                                        "severity": f["severity"], "status": f["status"]}
+                              for f in self.client.get_findings()}
             evidence["findings_after"] = findings_after
 
             primary = criteria.get("primary", {})
             if primary.get("type") == "db_state_change":
-                field = primary["field"]
-                expected = primary["to_value"]
                 for fid, after in findings_after.items():
                     before = findings_before.get(fid, {})
-                    if before.get(field) != after.get(field) and after[field] == expected:
+                    if before.get("severity") != after.get("severity"):
                         evidence["criteria_met"] = True
                         evidence["changed_finding"] = fid
-                        evidence["field"] = field
-                        evidence["from"] = before.get(field)
-                        evidence["to"] = after[field]
-                        # Check history
+                        evidence["field"] = "severity"
+                        evidence["from"] = before.get("severity")
+                        evidence["to"] = after["severity"]
                         try:
-                            h = self.client.get_finding_history(fid)
-                            evidence["history_entries"] = len(h)
+                            evidence["history_entries"] = len(
+                                self.client.get_finding_history(fid))
                         except Exception:
                             pass
                         break
-
-            elif primary.get("type") == "canary_in_output":
-                # Will be checked by the caller from the response
-                pass
 
         except Exception as exc:
             evidence["error"] = str(exc)

@@ -52,6 +52,7 @@ class SecurityEvaluator:
 
         result = {
             "scenario_id": sid,
+            "related_risk_ids": scenario.get("related_risk_ids", []),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "overall_verdict": overall,
             "total_attempts": len(records),

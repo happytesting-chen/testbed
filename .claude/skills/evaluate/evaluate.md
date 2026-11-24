@@ -61,6 +61,14 @@ To compare vulnerable vs protected:
 2. Run the same scenario with flags OFF → save result
 3. Use `evaluator.compare_configurations(vulnerable, protected)`
 
+## Linking to TRA
+
+Each evaluation result includes:
+- `scenario_id` — the test scenario that was executed
+- `related_risk_ids` — copied from the scenario, linking back to TRA risks
+
+The evaluation provides evidence that can inform TRA reassessment, but does NOT automatically change risk ratings. Any reassessment must follow the agreed risk methodology and be subject to human review.
+
 ## Output
 
 Results saved to `security_testing/results/<scenario_id>_<timestamp>.json`

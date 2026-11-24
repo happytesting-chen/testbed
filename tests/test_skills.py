@@ -59,16 +59,21 @@ def test_scenario_yaml_valid():
     assert s["threat_category"] == "RP.1"
     assert "objective" in s
     assert "legitimate_task" in s
-    assert "payload" in s
-    assert s["payload"]["type"] == "uploaded_document"
-    assert len(s["payload"]["content"]) > 100
-    assert "attack_steps" in s
-    assert len(s["attack_steps"]) >= 3
+    assert "attack_path" in s
     assert "success_criteria" in s
     assert s["success_criteria"]["primary"]["type"] == "db_state_change"
     assert "weakness_mapping" in s
-    assert "RP1-03" in s["weakness_mapping"]["required"]
+    assert any(w["id"] == "RP1-03" for w in s["weakness_mapping"]["required"])
     assert "configurations" in s
+
+
+def test_scenario_has_no_payload():
+    """Technique-independent scenarios must NOT contain attack payloads."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S1-RP1-001.yaml").read_text())
+    assert "payload" not in s, "Scenarios should not contain payloads (Approach B)"
+    assert "attack_steps" not in s or not any(
+        "message" in step for step in s.get("attack_steps", [])
+    ), "Scenarios should not contain specific chat messages"
 
 
 def test_scenario_references_tra_risks():
@@ -86,6 +91,19 @@ def test_scenario_has_no_evaluator_secrets():
     assert "DOCASSIST-CANARY" not in text
     assert "CANARY-SYS-9F2K" not in text
     assert "_ground_truth" not in text
+
+
+def test_red_team_runner_accepts_technique_params(tmp_path):
+    """Runner requires technique and payload as separate params."""
+    from security_testing.red_team import RedTeamRunner
+    runner = RedTeamRunner("http://localhost:9999", "fake-token",
+                           records_dir=str(tmp_path / "records"))
+    import inspect
+    sig = inspect.signature(runner.execute_scenario)
+    params = list(sig.parameters.keys())
+    assert "technique" in params
+    assert "payload_content" in params
+    assert "chat_message" in params
 
 
 def test_red_team_runner_importable():
