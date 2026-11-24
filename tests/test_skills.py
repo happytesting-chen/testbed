@@ -236,6 +236,20 @@ def test_threat_model_skill_is_generic():
     assert "DocAssist" not in text
 
 
+def test_threat_model_has_bundled_taxonomy():
+    """The generic taxonomy is bundled inside the skill, not in app/."""
+    root = Path(__file__).parent.parent
+    tax = root / ".claude/skills/threat-model/references/agentic_ai_threat_taxonomy.yaml"
+    assert tax.exists()
+    data = yaml.safe_load(tax.read_text(encoding="utf-8"))
+    assert "threat_categories" in data
+    ids = {t["id"] for t in data["threat_categories"]}
+    assert ids == {"RP.1", "RP.2", "KM.1", "TA.1", "IA.1", "IA.2", "XA.1"}
+    for t in data["threat_categories"]:
+        assert "potential_weaknesses" in t
+        assert len(t["potential_weaknesses"]) >= 1
+
+
 def test_threat_model_has_reference_file():
     """Document Assistant-specific guidance is in a reference file, not the skill."""
     root = Path(__file__).parent.parent
@@ -243,4 +257,3 @@ def test_threat_model_has_reference_file():
     assert ref.exists()
     text = ref.read_text(encoding="utf-8")
     assert "coordinator.py" in text
-    assert "weakness_registry.py" in text

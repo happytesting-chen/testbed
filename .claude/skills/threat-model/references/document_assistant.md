@@ -13,9 +13,14 @@ This file provides target-specific guidance for running the Threat Modeling Skil
 - `app/db.py` — Database schema, finding history, scope grants
 - `app/prompts.py` — System prompt versions
 
-## Predefined threat scope
+## Threat scope
 
-- `app/weakness_registry.py` — Seven threat categories (RP.1, RP.2, KM.1, TA.1, IA.1, IA.2, XA.1) with 24 weakness definitions
+Use the bundled default taxonomy (`references/agentic_ai_threat_taxonomy.yaml`).
+
+For testbed-specific weakness flag mappings and implementation status, see:
+- `app/weakness_registry.py` — 24 weakness definitions with implementation status and flag keys (testbed-specific, not part of the generic Skill)
+
+For design context:
 - `requests/DocAssist_Multi_Agent_Testbed_Design.md` — Architecture and weakness design
 - `requests/Attack_Scenarios_and_Batch_Roadmap.md` — Scenario definitions and batch mapping
 

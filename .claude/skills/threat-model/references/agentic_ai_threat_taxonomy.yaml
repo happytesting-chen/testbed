@@ -1,0 +1,87 @@
+# Agentic AI Threat Taxonomy — Default Threat Scope
+#
+# Seven threat categories for AI agent security assessment.
+# Derived from OWASP Agentic AI guidance and internal research.
+#
+# This taxonomy is generic — it applies to any multi-agent AI system,
+# not only the Document Assistant testbed.
+#
+# Each category includes potential weakness patterns that the Threat
+# Modeling Skill should check for when assessing a target application.
+
+threat_categories:
+  - id: "RP.1"
+    name: "Prompt Injection"
+    description: >
+      Untrusted content in any channel (user input, documents, tool outputs,
+      agent responses) is interpreted as instruction by an LLM agent.
+    potential_weaknesses:
+      - "No instruction hierarchy distinguishing system instructions from content"
+      - "Secrets or sensitive identifiers included in system prompts"
+      - "Untrusted document or retrieval content not marked or delimited"
+      - "Agent treats other agents' output as trusted instruction"
+
+  - id: "RP.2"
+    name: "Agent Goal Hijack"
+    description: >
+      An agent's objective or task plan is redirected by injected content,
+      causing it to perform actions the user did not request.
+    potential_weaknesses:
+      - "Agent re-plans based on content from untrusted sources"
+      - "Agent follows task-like instructions embedded in documents"
+      - "Agent auto-delegates sensitive actions without explicit user request"
+
+  - id: "KM.1"
+    name: "Memory and Context Poisoning"
+    description: >
+      Stored or retrievable context (conversation history, RAG results,
+      shared memory) is corrupted by injected content that persists across
+      turns, sessions, or users.
+    potential_weaknesses:
+      - "Conversation history carries injected instructions across turns"
+      - "Retrieval results not ranked by trust or source"
+      - "Full context forwarded to sub-agents without filtering"
+
+  - id: "TA.1"
+    name: "Tool Misuse and Exploitation"
+    description: >
+      A legitimate tool is applied unsafely — wrong scope, missing validation,
+      or insufficient authorization checks on tool arguments or results.
+    potential_weaknesses:
+      - "No scope check on resource identifiers (e.g., finding IDs, user IDs)"
+      - "Tool input values not validated against allowed sets"
+      - "Search or retrieval returns content across access boundaries"
+      - "Cross-resource data exposure through tool outputs"
+
+  - id: "IA.1"
+    name: "Identity and Privilege Abuse"
+    description: >
+      Delegation, role inheritance, or cached credentials are manipulated,
+      causing the system to act under the wrong identity or privilege level.
+    potential_weaknesses:
+      - "Credentials or secrets included in agent prompts"
+      - "Agent trusts role claims from delegation parameters without independent verification"
+      - "Agent uses its own service-level permissions instead of the user's"
+      - "Excessive identity information shared across agent boundaries"
+
+  - id: "IA.2"
+    name: "Privilege Escalation via Scope Creep"
+    description: >
+      Permissions expand beyond what the task requires — through auto-approval,
+      overbroad grants, or persistent elevated access.
+    potential_weaknesses:
+      - "Permission requests auto-approved without required authorization"
+      - "Grants scoped more broadly than requested"
+      - "Temporary permissions persist beyond intended lifetime or session"
+
+  - id: "XA.1"
+    name: "Insecure Inter-Agent Communication"
+    description: >
+      Messages or data passed between agents are not properly validated,
+      sanitized, or authenticated, allowing injection, spoofing, or
+      information leakage across agent trust boundaries.
+    potential_weaknesses:
+      - "Untrusted authority claims from one agent accepted by another"
+      - "Raw content relayed between agents without structured separation"
+      - "Unvalidated resource references passed across agent boundaries"
+      - "Excessive context or credentials shared with agents that don't need them"

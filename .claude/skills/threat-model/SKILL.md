@@ -27,9 +27,11 @@ Examine the codebase, documentation, and configuration files available in the wo
 
 ### Input 2 — Predefined Threat Scope
 
-Use the threat scope provided by the user. If none is specified, check for:
-- A threat taxonomy or weakness registry in the project (e.g., a weakness_registry module or threat_scope config file)
-- Standard references such as OWASP LLM Top 10 or OWASP Agentic AI guidance
+Use the threat scope provided by the user. If none is specified, use the **bundled default taxonomy**:
+
+- `references/agentic_ai_threat_taxonomy.yaml` — seven threat categories with potential weakness patterns for agentic AI systems
+
+The user may supply an alternative threat scope (e.g., OWASP LLM Top 10, an organization-specific taxonomy, or a custom YAML file). The Skill works with whatever scope is provided.
 
 The threat scope defines the categories to assess — not all categories will be applicable to every application.
 
