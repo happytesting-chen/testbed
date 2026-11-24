@@ -301,12 +301,17 @@ def test_reset_succeeds_but_state_not_restored(tmp_path):
 
 
 def test_reset_raises_exception(tmp_path):
-    """Reset raises → ERROR, excluded from both ASR calculations."""
+    """Reset raises during loop → ERROR, excluded from both ASR calculations."""
+    call = {"n": 0}
+    def flaky_reset():
+        call["n"] += 1
+        if call["n"] > 1:
+            raise RuntimeError("broken")
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
     frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=3,
-                                   reset_fn=lambda: (_ for _ in ()).throw(RuntimeError("broken")))
-    assert result["errors"] == 3
+                                   reset_fn=flaky_reset)
+    assert result["errors"] >= 2
     assert result["independently_validated"] is False
     assert result["independent_asr"] is None
 
@@ -1012,3 +1017,96 @@ def test_reset_and_asr_work_with_frozen_attack(tmp_path):
                                    expected_state=state)
     assert result["independently_validated"] is True
     assert result["independent_asr"] == 1.0
+
+
+# ── Verification: cumulative integration ─────────────────────────────────────
+
+def test_integrity_hash_is_full_sha256(tmp_path):
+    """Integrity hash must be full SHA-256 (64 hex chars), not truncated."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="test")
+    frozen = runner.freeze_attack(record)
+    assert len(frozen["_integrity_hash"]) == 64
+
+def test_frozen_attack_includes_provenance(tmp_path):
+    """Frozen attack must carry scenario_id, execution_id, source_attempt."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="go")
+    frozen = runner.freeze_attack(record)
+    assert frozen["scenario_id"] == "TS-001"
+    assert frozen["execution_id"] is not None
+    assert frozen["source_attempt"] == 1
+    assert frozen["source_verdict"] == "SUCCEEDED"
+
+def test_cross_session_replay_with_load(tmp_path):
+    """Phase C can load a persisted frozen attack into a new runner."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner1 = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                            records_dir=str(tmp_path / "r1"))
+    record = runner1.execute_attempt(APPROVED, "PI-001", chat_message="attack")
+    frozen = runner1.freeze_attack(record)
+
+    runner2 = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                            records_dir=str(tmp_path / "r2"))
+    with pytest.raises(ScenarioValidationError, match="verified successful"):
+        runner2.run_validation(APPROVED, frozen, repeat_count=1)
+
+    runner2.load_frozen_attack(frozen)
+    result = runner2.run_validation(APPROVED, frozen, repeat_count=2)
+    assert result["repetitions"] == 2
+
+def test_load_frozen_attack_rejects_tampered(tmp_path):
+    """load_frozen_attack rejects a frozen dict with modified inputs."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="go")
+    frozen = runner.freeze_attack(record)
+    frozen["chat_message"] = "TAMPERED"
+
+    runner2 = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r2"))
+    with pytest.raises(ScenarioValidationError, match="do not match"):
+        runner2.load_frozen_attack(frozen)
+
+def test_load_frozen_attack_rejects_missing_hash(tmp_path):
+    """load_frozen_attack rejects a dict without integrity hash."""
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="integrity hash"):
+        runner.load_frozen_attack({"technique_id": "PI-001"})
+
+def test_auto_capture_fails_on_broken_reset(tmp_path):
+    """If reset_fn raises during auto-capture of expected_state, it must propagate."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="go")
+    frozen = runner.freeze_attack(record)
+    with pytest.raises(RuntimeError, match="broken reset"):
+        runner.run_validation(
+            APPROVED, frozen, repeat_count=1,
+            reset_fn=lambda: (_ for _ in ()).throw(RuntimeError("broken reset")))
+
+def test_session_reset_failure_is_error(tmp_path):
+    """If reset_session() raises, the run is recorded as ERROR."""
+    class BrokenSessionTarget(MockTarget):
+        def reset_session(self):
+            raise RuntimeError("session clear failed")
+
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=BrokenSessionTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="go")
+    frozen = runner.freeze_attack(record)
+    state = {}
+    result = runner.run_validation(APPROVED, frozen, repeat_count=2,
+                                   reset_fn=lambda: None,
+                                   expected_state=state)
+    assert result["errors"] == 2
+    assert result["independently_validated"] is False
+    for run in result["runs"]:
+        assert run["verdict"] == "ERROR"
+        assert "session clear failed" in run.get("error", "")

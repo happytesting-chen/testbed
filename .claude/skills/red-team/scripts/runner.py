@@ -199,8 +199,8 @@ class RedTeamRunner:
             discovery_record: the attacker-visible record returned by execute_attempt()
 
         Returns:
-            Frozen attack dict with all execution-relevant inputs and an
-            integrity hash linking it to the verified discovery.
+            Frozen attack dict with all execution-relevant inputs, provenance
+            metadata, and an integrity hash linking it to the verified discovery.
 
         Raises:
             ScenarioValidationError if the record is not a verified SUCCEEDED
@@ -227,12 +227,43 @@ class RedTeamRunner:
                 "Cannot freeze: no verified successful discovery matches these inputs")
 
         return {
+            "scenario_id": discovery_record.get("scenario_id"),
+            "execution_id": discovery_record.get("execution_id"),
             "technique_id": technique_id,
             "payload_content": payload_content,
             "payload_filename": payload_filename,
             "chat_message": chat_message,
+            "source_attempt": discovery_record.get("attempt"),
+            "source_verdict": "SUCCEEDED",
             "_integrity_hash": integrity_hash,
         }
+
+    def load_frozen_attack(self, frozen_attack: dict):
+        """Register a persisted frozen attack for cross-session replay.
+
+        Phase C can load a frozen attack saved by Phase B and register it
+        with a new runner instance before calling run_validation().
+
+        Verifies the integrity hash matches the inputs. Does NOT re-verify
+        the original evaluator verdict — the persisted record is trusted.
+
+        Raises:
+            ScenarioValidationError if the hash is missing or does not match.
+        """
+        stored_hash = frozen_attack.get("_integrity_hash")
+        if not stored_hash:
+            raise ScenarioValidationError(
+                "Frozen attack missing integrity hash")
+        computed = _attack_inputs_hash(
+            frozen_attack.get("technique_id"),
+            frozen_attack.get("payload_content"),
+            frozen_attack.get("payload_filename"),
+            frozen_attack.get("chat_message"),
+        )
+        if computed != stored_hash:
+            raise ScenarioValidationError(
+                "Frozen attack inputs do not match integrity hash")
+        self._verified_successes.add(stored_hash)
 
     # ── Step 7: Repeat Validation ─────────────────────────────────────────────
 
@@ -285,13 +316,10 @@ class RedTeamRunner:
         frozen_hash = computed_hash
         has_reset = reset_fn is not None
 
-        # Capture expected initial state if not provided
+        # Capture expected initial state from a known clean baseline
         if expected_state is None:
             if reset_fn:
-                try:
-                    reset_fn()
-                except Exception:
-                    pass
+                reset_fn()
             expected_state = self.target.snapshot_state()
 
         runs = []
@@ -303,7 +331,14 @@ class RedTeamRunner:
 
             # Always start a fresh session if the target supports it
             if hasattr(self.target, "reset_session"):
-                self.target.reset_session()
+                try:
+                    self.target.reset_session()
+                except Exception as exc:
+                    runs.append({"validation_run": i, "verdict": "ERROR",
+                                 "error": f"Session reset failed: {exc}",
+                                 "reset_ok": False, "state_verified": False})
+                    all_verified_independent = False
+                    continue
 
             if reset_fn:
                 try:
@@ -470,11 +505,11 @@ def _hash(content):
 
 
 def _attack_inputs_hash(technique_id, payload_content, payload_filename, chat_message):
-    """Deterministic hash over all execution-relevant attack inputs."""
+    """Deterministic full SHA-256 over all execution-relevant attack inputs."""
     canonical = json.dumps({
         "technique_id": technique_id,
         "payload_content": payload_content,
         "payload_filename": payload_filename,
         "chat_message": chat_message,
     }, sort_keys=True, ensure_ascii=True)
-    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+    return hashlib.sha256(canonical.encode()).hexdigest()
