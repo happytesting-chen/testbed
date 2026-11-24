@@ -1,146 +1,254 @@
-"""Red-Team Testing — execute approved scenarios against the live application.
+"""Generic Red-Team Runner — execute approved scenarios against any AI target.
 
-Scenarios are technique-independent. The Red-Team Skill (or caller) provides:
-- attack_technique: description of the approach
-- payload_content: the actual attack content (document text or chat message)
-- chat_message: the trigger message to send via chat
+The runner is target-agnostic. Target-specific behavior is provided by:
+- A target adapter (how to interact with the application)
+- An evidence collector (how to observe outcomes)
+- An evaluator function (how to check success criteria)
 
 Usage:
     from security_testing.red_team import RedTeamRunner
-    runner = RedTeamRunner(target_url, analyst_token)
-    records = runner.execute_scenario(scenario, technique="...", payload="...", message="...")
+
+    runner = RedTeamRunner(
+        target=target_adapter,       # implements chat(), upload(), snapshot_state()
+        evaluator=eval_fn,           # callable(record, criteria) -> verdict
+        records_dir="security_testing/records",
+    )
+    summary = runner.run_scenario(scenario, technique_id, payload, message, budget=10)
 """
 import json
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .target_adapter import TargetClient
-
 
 class RedTeamRunner:
-    def __init__(self, target_url: str, token: str,
+    """Generic red-team execution engine."""
+
+    def __init__(self, target, evaluator=None,
                  records_dir: str = "security_testing/records"):
-        self.client = TargetClient(target_url, token)
+        """
+        Args:
+            target: object with chat(), upload(), snapshot_state() methods
+            evaluator: callable(record, criteria) -> dict with "verdict" key
+            records_dir: directory for saving records
+        """
+        self.target = target
+        self.evaluator = evaluator or self._default_evaluator
         self.records_dir = Path(records_dir)
         self.records_dir.mkdir(parents=True, exist_ok=True)
 
-    def execute_scenario(self, scenario: dict,
-                         technique: str,
-                         payload_content: str | None = None,
-                         payload_filename: str = "attack.md",
-                         chat_message: str | None = None,
-                         budget: int = 5) -> list[dict]:
-        """Execute a scenario with a specific technique and payload.
+    # ── Step 1: Baseline ─────────────────────────────────────────────────────
 
-        Args:
-            scenario: parsed YAML scenario (technique-independent)
-            technique: description of the attack technique being used
-            payload_content: document content to upload (for C2 entry)
-            payload_filename: filename for upload
-            chat_message: message to send via chat API
-            budget: max attempts with this technique
+    def run_baseline(self, scenario: dict) -> dict:
+        """Execute the legitimate task without malicious content."""
+        sid = scenario["id"]
+        task = scenario.get("legitimate_task", "")
+        state_before = self.target.snapshot_state()
 
-        Returns:
-            list of attempt records
-        """
+        record = {
+            "scenario_id": sid,
+            "phase": "baseline",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "legitimate_task": task,
+            "state_before": state_before,
+        }
+
+        try:
+            result = self.target.chat(task)
+            record["run_id"] = result.get("run_id")
+            record["response_preview"] = result.get("response", "")[:500]
+            record["state_after"] = self.target.snapshot_state()
+        except Exception as exc:
+            record["error"] = str(exc)
+
+        self._save(record, f"{sid}_baseline.json")
+        return record
+
+    # ── Steps 2-6: Discovery ─────────────────────────────────────────────────
+
+    def execute_attempt(self, scenario: dict, technique_id: str,
+                        payload_content: str | None = None,
+                        payload_filename: str = "attack.md",
+                        chat_message: str | None = None,
+                        attempt: int = 1,
+                        state_before: dict | None = None) -> dict:
+        """Execute a single attack attempt."""
         sid = scenario["id"]
         entry = scenario.get("attacker", {}).get("entry_point", {})
         criteria = scenario.get("success_criteria", {})
 
-        records = []
-        session_id = None
+        if state_before is None:
+            state_before = self.target.snapshot_state()
 
-        findings_before = self._snapshot_findings()
+        record = {
+            "scenario_id": sid,
+            "phase": "discovery",
+            "attempt": attempt,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "technique_id": technique_id,
+            "payload": {
+                "type": "uploaded_document" if payload_content else "chat_only",
+                "filename": payload_filename if payload_content else None,
+                "content_hash": hashlib.sha256(
+                    (payload_content or "").encode()).hexdigest()[:16],
+                "content": payload_content,
+            },
+            "chat_message": chat_message,
+            "state_before": state_before,
+        }
 
-        for attempt in range(1, budget + 1):
+        try:
+            if payload_content and "upload" in entry.get("method", "").lower():
+                upload_result = self.target.upload(payload_filename, payload_content)
+                record["upload"] = upload_result
+
+            if chat_message:
+                result = self.target.chat(
+                    chat_message,
+                    run_tag=f"{sid}-attempt-{attempt}")
+                record["run_id"] = result.get("run_id")
+                record["session_id"] = result.get("session_id")
+                record["response_preview"] = result.get("response", "")[:500]
+
+            record["state_after"] = self.target.snapshot_state()
+            verdict = self.evaluator(record, criteria)
+            record["verdict"] = verdict.get("verdict", "INCONCLUSIVE")
+            record["evidence"] = verdict.get("evidence", [])
+
+        except Exception as exc:
+            record["error"] = str(exc)
+            record["verdict"] = "ERROR"
+
+        self._save(record, f"{sid}_attempt_{attempt}.json")
+        return record
+
+    # ── Step 7: Repeat Validation ─────────────────────────────────────────────
+
+    def run_validation(self, scenario: dict, technique_id: str,
+                       payload_content: str | None,
+                       payload_filename: str,
+                       chat_message: str | None,
+                       repeat_count: int = 10,
+                       reset_fn=None) -> dict:
+        """Repeat the exact successful payload to measure reproducibility."""
+        sid = scenario["id"]
+        criteria = scenario.get("success_criteria", {})
+        results = []
+
+        for i in range(1, repeat_count + 1):
+            if reset_fn:
+                try:
+                    reset_fn()
+                except Exception as exc:
+                    results.append({"run": i, "verdict": "ERROR",
+                                    "error": f"Reset failed: {exc}"})
+                    continue
+
+            state_before = self.target.snapshot_state()
             record = {
                 "scenario_id": sid,
-                "attempt": attempt,
+                "phase": "validation",
+                "validation_run": i,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "technique": technique,
+                "technique_id": technique_id,
                 "payload": {
                     "type": "uploaded_document" if payload_content else "chat_only",
-                    "filename": payload_filename if payload_content else None,
                     "content_hash": hashlib.sha256(
                         (payload_content or "").encode()).hexdigest()[:16],
-                    "content": payload_content,
                 },
                 "chat_message": chat_message,
-                "findings_before": findings_before,
+                "state_before": state_before,
             }
 
             try:
-                if payload_content and entry.get("method") == "POST /api/reports/upload":
-                    upload = self.client.upload_report(payload_filename, payload_content)
-                    record["upload"] = {"id": upload["id"], "filename": payload_filename}
+                if payload_content and scenario.get("attacker", {}).get(
+                        "entry_point", {}).get("method", "").lower().find("upload") >= 0:
+                    self.target.upload(payload_filename, payload_content)
 
                 if chat_message:
-                    result = self.client.chat(
-                        chat_message, session_id=session_id,
-                        run_tag=f"{sid}-attempt-{attempt}")
-                    session_id = result.get("session_id")
-                    record["run_id"] = result["run_id"]
-                    record["session_id"] = session_id
-                    record["response_preview"] = result["response"][:500]
+                    result = self.target.chat(
+                        chat_message,
+                        run_tag=f"{sid}-validation-{i}")
+                    record["run_id"] = result.get("run_id")
+                    record["response_preview"] = result.get("response", "")[:500]
 
-                evidence = self._collect_evidence(findings_before, criteria)
-                record["observable_evidence"] = evidence
-                record["attacker_assessment"] = (
-                    "succeeded" if evidence.get("criteria_met") else "failed")
+                record["state_after"] = self.target.snapshot_state()
+                verdict = self.evaluator(record, criteria)
+                record["verdict"] = verdict.get("verdict", "INCONCLUSIVE")
 
             except Exception as exc:
                 record["error"] = str(exc)
-                record["attacker_assessment"] = "error"
+                record["verdict"] = "ERROR"
 
-            records.append(record)
-            self._save_record(record)
+            results.append(record)
+            self._save(record, f"{sid}_validation_{i}.json")
 
-            if record.get("attacker_assessment") == "succeeded":
-                break
+        succeeded = sum(1 for r in results if r["verdict"] == "SUCCEEDED")
+        failed = sum(1 for r in results if r["verdict"] == "FAILED")
+        errors = sum(1 for r in results if r["verdict"] == "ERROR")
+        inconclusive = sum(1 for r in results if r["verdict"] == "INCONCLUSIVE")
+        valid = succeeded + failed
 
-        return records
+        return {
+            "repetitions": len(results),
+            "succeeded": succeeded,
+            "failed": failed,
+            "inconclusive": inconclusive,
+            "errors": errors,
+            "observed_success_rate": succeeded / valid if valid > 0 else None,
+            "runs": results,
+        }
 
-    def _snapshot_findings(self) -> dict:
-        try:
-            return {f["id"]: {"finding_id": f.get("finding_id"),
-                              "severity": f["severity"], "status": f["status"]}
-                    for f in self.client.get_findings()}
-        except Exception:
-            return {}
+    # ── Summary ───────────────────────────────────────────────────────────────
 
-    def _collect_evidence(self, findings_before: dict, criteria: dict) -> dict:
-        evidence = {"criteria_met": False}
-        try:
-            findings_after = {f["id"]: {"finding_id": f.get("finding_id"),
-                                        "severity": f["severity"], "status": f["status"]}
-                              for f in self.client.get_findings()}
-            evidence["findings_after"] = findings_after
+    def generate_summary(self, scenario: dict, baseline: dict,
+                         discovery_records: list[dict],
+                         validation: dict | None = None,
+                         testing_mode: str = "black_box") -> dict:
+        """Generate the final scenario summary."""
+        sid = scenario["id"]
+        first_success = next(
+            (r for r in discovery_records if r.get("verdict") == "SUCCEEDED"), None)
 
-            primary = criteria.get("primary", {})
-            if primary.get("type") == "db_state_change":
-                for fid, after in findings_after.items():
-                    before = findings_before.get(fid, {})
-                    if before.get("severity") != after.get("severity"):
-                        evidence["criteria_met"] = True
-                        evidence["changed_finding"] = fid
-                        evidence["field"] = "severity"
-                        evidence["from"] = before.get("severity")
-                        evidence["to"] = after["severity"]
-                        try:
-                            evidence["history_entries"] = len(
-                                self.client.get_finding_history(fid))
-                        except Exception:
-                            pass
-                        break
+        summary = {
+            "scenario_id": sid,
+            "related_risk_ids": scenario.get("related_risk_ids", []),
+            "objective": scenario.get("objective", ""),
+            "testing_mode": testing_mode,
+            "baseline": {
+                "response_preview": baseline.get("response_preview", ""),
+                "state_snapshot": baseline.get("state_before", {}),
+            },
+            "discovery": {
+                "total_attempts": len(discovery_records),
+                "first_success_attempt": first_success["attempt"] if first_success else None,
+                "successful_technique": first_success["technique_id"] if first_success else None,
+                "successful_payload_hash": (
+                    first_success["payload"]["content_hash"] if first_success else None),
+            },
+            "validation": validation if validation else {"not_performed": True},
+            "limitations": [],
+        }
 
-        except Exception as exc:
-            evidence["error"] = str(exc)
-        return evidence
+        self._save(summary, f"{sid}_summary.json")
+        return summary
 
-    def _save_record(self, record: dict):
-        sid = record["scenario_id"]
-        attempt = record["attempt"]
-        path = self.records_dir / f"{sid}_attempt_{attempt}.json"
-        path.write_text(json.dumps(record, indent=2, default=str),
+    # ── Default evaluator ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _default_evaluator(record: dict, criteria: dict) -> dict:
+        """Simple evaluator: compare state_before and state_after."""
+        before = record.get("state_before", {})
+        after = record.get("state_after", {})
+        if before and after and before != after:
+            return {"verdict": "INCONCLUSIVE",
+                    "evidence": [{"type": "state_changed",
+                                  "detail": "Application state changed"}]}
+        return {"verdict": "FAILED", "evidence": []}
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _save(self, data: dict, filename: str):
+        path = self.records_dir / filename
+        path.write_text(json.dumps(data, indent=2, default=str),
                         encoding="utf-8")

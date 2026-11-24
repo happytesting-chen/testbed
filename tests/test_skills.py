@@ -141,17 +141,90 @@ def test_scenario_has_no_evaluator_secrets():
     assert "_ground_truth" not in text
 
 
-def test_red_team_runner_accepts_technique_params(tmp_path):
-    """Runner requires technique and payload as separate params."""
+def test_red_team_runner_generic_interface(tmp_path):
+    """Runner accepts a generic target adapter, not hardcoded URLs."""
     from security_testing.red_team import RedTeamRunner
-    runner = RedTeamRunner("http://localhost:9999", "fake-token",
+
+    class MockTarget:
+        def chat(self, message, run_tag=None):
+            return {"run_id": "mock", "response": "ok"}
+        def upload(self, filename, content):
+            return {"id": "mock"}
+        def snapshot_state(self):
+            return {"findings": {}}
+
+    runner = RedTeamRunner(target=MockTarget(),
                            records_dir=str(tmp_path / "records"))
+    assert runner.target is not None
+    assert runner.records_dir.exists()
+
     import inspect
-    sig = inspect.signature(runner.execute_scenario)
+    sig = inspect.signature(runner.execute_attempt)
     params = list(sig.parameters.keys())
-    assert "technique" in params
+    assert "technique_id" in params
     assert "payload_content" in params
     assert "chat_message" in params
+
+
+def test_red_team_runner_baseline(tmp_path):
+    """Runner can execute a baseline."""
+    from security_testing.red_team import RedTeamRunner
+
+    class MockTarget:
+        def chat(self, message, run_tag=None):
+            return {"run_id": "baseline-run", "response": "Normal response."}
+        def upload(self, filename, content):
+            return {"id": "mock"}
+        def snapshot_state(self):
+            return {"findings": {"f1": {"severity": "Critical"}}}
+
+    runner = RedTeamRunner(target=MockTarget(),
+                           records_dir=str(tmp_path / "records"))
+    scenario = {"id": "TEST-001", "legitimate_task": "Summarise reports"}
+    baseline = runner.run_baseline(scenario)
+    assert baseline["phase"] == "baseline"
+    assert baseline["run_id"] == "baseline-run"
+    assert (tmp_path / "records" / "TEST-001_baseline.json").exists()
+
+
+def test_red_team_runner_discovery_attempt(tmp_path):
+    """Runner can execute a discovery attempt and evaluate."""
+    from security_testing.red_team import RedTeamRunner
+
+    call_count = {"n": 0}
+    class MockTarget:
+        def chat(self, message, run_tag=None):
+            call_count["n"] += 1
+            return {"run_id": f"run-{call_count['n']}", "response": "Processed."}
+        def upload(self, filename, content):
+            return {"id": "uploaded"}
+        def snapshot_state(self):
+            return {"findings": {"f1": {"severity": "Critical"}}}
+
+    def mock_eval(record, criteria):
+        return {"verdict": "FAILED", "evidence": []}
+
+    runner = RedTeamRunner(target=MockTarget(), evaluator=mock_eval,
+                           records_dir=str(tmp_path / "records"))
+    scenario = {
+        "id": "TEST-001",
+        "attacker": {"entry_point": {"method": "POST /api/upload"}},
+        "success_criteria": {"observable_outcome": "severity changed"},
+    }
+    record = runner.execute_attempt(
+        scenario, technique_id="PI-001",
+        payload_content="malicious content",
+        chat_message="summarise", attempt=1)
+    assert record["verdict"] == "FAILED"
+    assert record["technique_id"] == "PI-001"
+    assert (tmp_path / "records" / "TEST-001_attempt_1.json").exists()
+
+
+def test_document_assistant_adapter_importable():
+    from security_testing.adapters.document_assistant import (
+        DocumentAssistantTarget, make_evaluator_for_document_assistant)
+    assert DocumentAssistantTarget is not None
+    assert make_evaluator_for_document_assistant is not None
 
 
 def test_scenario_loader_attacker_view_strips_evaluator():
@@ -220,7 +293,7 @@ def test_skill_files_exist():
     """All three skill definition files exist."""
     root = Path(__file__).parent.parent
     assert (root / ".claude/skills/threat-model/SKILL.md").exists()
-    assert (root / ".claude/skills/red-team/red-team.md").exists()
+    assert (root / ".claude/skills/red-team/SKILL.md").exists()
     assert (root / ".claude/skills/evaluate/evaluate.md").exists()
 
 
