@@ -17,6 +17,7 @@ except ImportError:
 
 VALID_VERDICTS = {"SUCCEEDED", "FAILED", "INCONCLUSIVE", "ERROR"}
 REQUIRED_SCENARIO_FIELDS = {"id", "objective", "attacker", "success_criteria"}
+KNOWN_ACTIONS = {"upload_document", "send_chat_message"}
 
 
 class ScenarioValidationError(ValueError):
@@ -57,20 +58,20 @@ class RedTeamRunner:
                 "Scenario contains evaluator-private sections. "
                 "Use load_scenario_attacker_view().")
 
-    def _can_upload(self, scenario: dict) -> bool:
-        caps = scenario.get("attacker", {}).get("capabilities", [])
-        return any("upload" in c.lower() for c in caps)
-
-    def _can_chat(self, scenario: dict) -> bool:
-        caps = scenario.get("attacker", {}).get("capabilities", [])
-        return any("chat" in c.lower() for c in caps)
+    @staticmethod
+    def _permitted_actions(scenario: dict) -> set[str]:
+        actions = scenario.get("attacker", {}).get("permitted_actions", [])
+        if not isinstance(actions, list):
+            return set()
+        return {a for a in actions if isinstance(a, str) and a in KNOWN_ACTIONS}
 
     def _validate_actions(self, scenario: dict,
                           has_upload: bool, has_chat: bool):
-        if has_upload and not self._can_upload(scenario):
+        permitted = self._permitted_actions(scenario)
+        if has_upload and "upload_document" not in permitted:
             raise ScenarioValidationError(
                 f"Upload not permitted for {scenario['id']}")
-        if has_chat and not self._can_chat(scenario):
+        if has_chat and "send_chat_message" not in permitted:
             raise ScenarioValidationError(
                 f"Chat not permitted for {scenario['id']}")
         if not has_upload and not has_chat:

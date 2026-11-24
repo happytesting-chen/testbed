@@ -180,7 +180,7 @@ def test_red_team_runner_baseline(tmp_path):
 
     runner = RedTeamRunner(target=MockTarget(),
                            records_dir=str(tmp_path / "records"))
-    scenario = {"id": "TEST-001", "status": "approved", "objective": "test", "attacker": {"role": "a", "capabilities": ["chat"]}, "success_criteria": {}, "legitimate_task": "Summarise reports"}
+    scenario = {"id": "TEST-001", "status": "approved", "objective": "test", "attacker": {"role": "a", "permitted_actions": ["send_chat_message"], "capabilities": ["chat"]}, "success_criteria": {}, "legitimate_task": "Summarise reports"}
     baseline = runner.run_baseline(scenario)
     assert baseline["phase"] == "baseline"
     assert "run_id" in baseline
@@ -209,7 +209,7 @@ def test_red_team_runner_discovery_attempt(tmp_path):
     scenario = {
         "id": "TEST-001", "status": "approved",
         "objective": "Test",
-        "attacker": {"role": "analyst", "capabilities": ["Upload reports", "Send chat messages"],
+        "attacker": {"role": "analyst", "permitted_actions": ["upload_document", "send_chat_message"], "capabilities": ["Upload reports", "Send chat messages"],
                       "entry_point": {"method": "POST /api/upload"}},
         "success_criteria": {"observable_outcome": "severity changed"},
     }
@@ -312,10 +312,10 @@ def test_runner_records_access_mode(tmp_path):
     for mode in ("black_box", "grey_box", "white_box"):
         runner = RedTeamRunner(target=MockTarget(), access_mode=mode,
                                records_dir=str(tmp_path / mode))
-        baseline = runner.run_baseline({"id": "T1", "status": "approved", "objective": "test", "attacker": {"role": "a", "capabilities": ["chat"]}, "success_criteria": {}, "legitimate_task": "test"})
+        baseline = runner.run_baseline({"id": "T1", "status": "approved", "objective": "test", "attacker": {"role": "a", "permitted_actions": ["send_chat_message"], "capabilities": ["chat"]}, "success_criteria": {}, "legitimate_task": "test"})
         assert baseline["access_mode"] == mode
         record = runner.execute_attempt(
-            {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
+            {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "permitted_actions": ["send_chat_message"], "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
             technique_id="PI-001", chat_message="test")
         assert record["access_mode"] == mode
 
@@ -338,7 +338,7 @@ def test_runner_black_box_no_trace_in_record(tmp_path):
                            trace_provider=mock_trace_provider,
                            records_dir=str(tmp_path / "records"))
     record = runner.execute_attempt(
-        {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
+        {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "permitted_actions": ["send_chat_message"], "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
         technique_id="PI-001", chat_message="test")
     assert "trace" not in record
 
@@ -364,7 +364,7 @@ def test_runner_grey_box_has_filtered_trace(tmp_path):
                            trace_provider=mock_trace_provider,
                            records_dir=str(tmp_path / "records"))
     record = runner.execute_attempt(
-        {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
+        {"id": "T1", "status": "approved", "objective": "t", "attacker": {"role": "a", "permitted_actions": ["send_chat_message"], "capabilities": ["Send chat messages"], "entry_point": {}}, "success_criteria": {}},
         technique_id="PI-001", chat_message="test")
     assert "trace" in record
     stages = [e["stage"] for e in record["trace"]["events"]]

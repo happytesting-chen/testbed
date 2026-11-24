@@ -18,11 +18,14 @@ A YAML file produced by the Threat Modeling Skill (or supplied independently) wi
 The scenario provides the fixed testing contract:
 - Scenario ID, threat category, related TRA risk IDs
 - Attack objective and legitimate user task
-- Attacker role and permitted capabilities
+- Attacker role and permitted actions (`upload_document`, `send_chat_message`)
+- Human-readable capability descriptions
 - Entry point and controlled surface
 - Preconditions
 - Abstract attack path
 - Observable success criteria
+
+**Attack scope enforcement:** The runner authorizes attacker actions using `attacker.permitted_actions` — a list of explicit identifiers (`upload_document`, `send_chat_message`). Natural-language `capabilities` are documentation only. Unknown, negated, or missing identifiers do not grant permissions. The same checks apply to discovery attempts and repeat validation.
 
 The scenario does NOT contain payloads or specific techniques — those are this Skill's responsibility.
 

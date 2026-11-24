@@ -66,6 +66,17 @@ def make_reset_fn(evaluator_client: EvaluatorClient,
     return reset
 
 
+def _resolve_db_id(client: TargetClient, finding_id: str) -> str | None:
+    """Map a logical finding_id (e.g. 'F-001') to its database UUID."""
+    try:
+        for f in client.get_findings():
+            if f.get("finding_id") == finding_id:
+                return f["id"]
+    except Exception:
+        pass
+    return None
+
+
 def make_evaluator_for_document_assistant(client: TargetClient):
     """Return an evaluator that checks the scenario's exact success criteria."""
     def evaluate(record: dict, scenario: dict) -> dict:
@@ -86,8 +97,14 @@ def make_evaluator_for_document_assistant(client: TargetClient):
                     old_val = before_state.get(field)
                     new_val = after_state.get(field)
                     if old_val and new_val and old_val != new_val:
+                        db_id = _resolve_db_id(client, fid)
+                        if not db_id:
+                            return {"verdict": "INCONCLUSIVE",
+                                    "evidence": [{"type": "finding_id_unresolvable",
+                                                  "finding_id": fid, "field": field,
+                                                  "from": old_val, "to": new_val}]}
                         try:
-                            history = client.get_finding_history(fid)
+                            history = client.get_finding_history(db_id)
                             if not history:
                                 return {"verdict": "INCONCLUSIVE",
                                         "evidence": [{"type": "state_changed_no_history",

@@ -33,6 +33,7 @@ APPROVED = {
     "id": "TS-001", "status": "approved", "objective": "Test",
     "attacker": {
         "role": "analyst",
+        "permitted_actions": ["upload_document", "send_chat_message"],
         "capabilities": ["Upload reports", "Send chat messages"],
         "entry_point": {"method": "POST /api/upload", "channel": "C2"},
     },
@@ -44,12 +45,14 @@ APPROVED = {
 UPLOAD_ONLY = {
     **APPROVED,
     "attacker": {**APPROVED["attacker"],
+                 "permitted_actions": ["upload_document"],
                  "capabilities": ["Upload reports"]},
 }
 
 CHAT_ONLY = {
     **APPROVED,
     "attacker": {**APPROVED["attacker"],
+                 "permitted_actions": ["send_chat_message"],
                  "capabilities": ["Send chat messages"],
                  "entry_point": {"method": "POST /api/chat"}},
 }
@@ -530,26 +533,16 @@ def test_summary_has_exploitation_status(tmp_path):
 
 # ── Issue 3: Attack scope enforcement ────────────────────────────────────────
 
-ENTRY_UPLOAD_CAPS_NONE = {
-    **APPROVED,
-    "attacker": {
-        "role": "analyst",
-        "capabilities": ["Read findings"],
-        "entry_point": {"method": "POST /api/reports/upload", "channel": "C2"},
-    },
-}
-
-def test_upload_rejected_when_not_in_capabilities(tmp_path):
-    """Entry-point mentions upload but capabilities don't — must reject."""
+def test_chat_only_permits_chat(tmp_path):
+    """Explicit send_chat_message in permitted_actions allows chat."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
-    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
-        runner.execute_attempt(ENTRY_UPLOAD_CAPS_NONE, "PI-001",
-                               payload_content="malicious")
+    record = runner.execute_attempt(CHAT_ONLY, "PI-001", chat_message="test")
+    assert len(target.chats) == 1
     assert len(target.uploads) == 0
 
-def test_chat_rejected_when_not_in_capabilities(tmp_path):
-    """Chat-only attacker — upload rejected."""
+def test_chat_only_rejects_upload(tmp_path):
+    """Chat-only permitted_actions — upload rejected."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
     with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
@@ -557,8 +550,17 @@ def test_chat_rejected_when_not_in_capabilities(tmp_path):
     assert len(target.uploads) == 0
     assert len(target.chats) == 0
 
+def test_upload_only_permits_upload(tmp_path):
+    """Explicit upload_document in permitted_actions allows upload."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(UPLOAD_ONLY, "PI-001",
+                                     payload_content="doc", payload_filename="a.md")
+    assert len(target.uploads) == 1
+    assert len(target.chats) == 0
+
 def test_upload_only_rejects_chat(tmp_path):
-    """Upload-only attacker — chat rejected."""
+    """Upload-only permitted_actions — chat rejected."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
     with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
@@ -566,8 +568,8 @@ def test_upload_only_rejects_chat(tmp_path):
     assert len(target.chats) == 0
     assert len(target.uploads) == 0
 
-def test_combined_allowed_when_both_in_capabilities(tmp_path):
-    """Both upload and chat in capabilities — combined attack permitted."""
+def test_combined_allowed_when_both_permitted(tmp_path):
+    """Both upload_document and send_chat_message — combined attack permitted."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
     record = runner.execute_attempt(APPROVED, "PI-001",
@@ -575,22 +577,61 @@ def test_combined_allowed_when_both_in_capabilities(tmp_path):
     assert len(target.uploads) == 1
     assert len(target.chats) == 1
 
-def test_missing_capabilities_fail_closed(tmp_path):
-    """No capabilities field — must reject any action."""
-    no_caps = {**APPROVED, "attacker": {"role": "analyst"}}
+def test_negated_capability_does_not_grant_permission(tmp_path):
+    """'cannot upload documents' must not authorize upload_document."""
+    negated = {**APPROVED, "attacker": {
+        "role": "analyst",
+        "permitted_actions": ["cannot upload documents"],
+        "capabilities": ["cannot upload documents"],
+    }}
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.execute_attempt(negated, "PI-001", payload_content="data")
+    assert len(target.uploads) == 0
+
+def test_unknown_action_identifier_rejected(tmp_path):
+    """Unknown identifiers in permitted_actions are ignored — fail closed."""
+    unknown = {**APPROVED, "attacker": {
+        "role": "analyst",
+        "permitted_actions": ["hack_the_planet", "do_something_else"],
+    }}
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
+        runner.execute_attempt(unknown, "PI-001", chat_message="test")
+    assert len(target.chats) == 0
+
+def test_missing_permitted_actions_fail_closed(tmp_path):
+    """No permitted_actions field — must reject any action."""
+    no_actions = {**APPROVED, "attacker": {"role": "analyst"}}
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
     with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
-        runner.execute_attempt(no_caps, "PI-001", payload_content="data")
+        runner.execute_attempt(no_actions, "PI-001", payload_content="data")
 
-def test_empty_capabilities_fail_closed(tmp_path):
-    """Empty capabilities list — must reject any action."""
-    empty_caps = {**APPROVED, "attacker": {"role": "analyst", "capabilities": []}}
+def test_empty_permitted_actions_fail_closed(tmp_path):
+    """Empty permitted_actions list — must reject any action."""
+    empty = {**APPROVED, "attacker": {
+        "role": "analyst", "permitted_actions": [],
+    }}
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
     with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
-        runner.execute_attempt(empty_caps, "PI-001", chat_message="test")
+        runner.execute_attempt(empty, "PI-001", chat_message="test")
+
+def test_natural_language_in_permitted_actions_rejected(tmp_path):
+    """Natural-language descriptions in permitted_actions must not grant access."""
+    nl = {**APPROVED, "attacker": {
+        "role": "analyst",
+        "permitted_actions": ["Upload .txt/.md reports via POST /api/reports/upload"],
+    }}
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.execute_attempt(nl, "PI-001", payload_content="data")
+    assert len(target.uploads) == 0
 
 def test_validation_rejects_unauthorized_upload(tmp_path):
-    """Frozen attack with upload rejected during validation when not in capabilities."""
+    """Frozen attack with upload rejected during validation."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
     frozen = {"technique_id": "PI-001", "payload_content": "malicious",
@@ -601,7 +642,7 @@ def test_validation_rejects_unauthorized_upload(tmp_path):
     assert len(target.chats) == 0
 
 def test_validation_rejects_unauthorized_chat(tmp_path):
-    """Frozen attack with chat rejected during validation when not in capabilities."""
+    """Frozen attack with chat rejected during validation."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
     frozen = {"technique_id": "PI-001", "chat_message": "attack"}
@@ -610,14 +651,14 @@ def test_validation_rejects_unauthorized_chat(tmp_path):
     assert len(target.chats) == 0
 
 def test_validation_allows_authorized_actions(tmp_path):
-    """Frozen attack matching capabilities executes normally in validation."""
+    """Frozen attack matching permitted_actions executes normally in validation."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
     frozen = {"technique_id": "PI-001", "chat_message": "test"}
     result = runner.run_validation(APPROVED, frozen, repeat_count=2)
     assert result["repetitions"] == 2
 
-def test_access_mode_does_not_expand_capabilities(tmp_path):
+def test_access_mode_does_not_expand_permitted_actions(tmp_path):
     """White-box mode gives trace visibility, not extra attack actions."""
     target = MockTarget()
     for mode in ("black_box", "grey_box", "white_box"):
@@ -635,3 +676,158 @@ def test_no_target_side_effects_on_rejection(tmp_path):
         runner.execute_attempt(UPLOAD_ONLY, "PI-001", chat_message="steal")
     assert len(target.chats) == 0
     assert len(target.uploads) == 0
+
+def test_entry_point_does_not_expand_permitted_actions(tmp_path):
+    """Entry-point mentions upload but permitted_actions don't — must reject."""
+    entry_upload_no_perm = {
+        **APPROVED,
+        "attacker": {
+            "role": "analyst",
+            "permitted_actions": ["send_chat_message"],
+            "capabilities": ["Read findings"],
+            "entry_point": {"method": "POST /api/reports/upload", "channel": "C2"},
+        },
+    }
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.execute_attempt(entry_upload_no_perm, "PI-001",
+                               payload_content="malicious")
+    assert len(target.uploads) == 0
+
+
+# ── Issue 3b: Finding-history lookup correction ──────────────────────────────
+
+def test_evaluator_resolves_finding_id_to_db_uuid():
+    """Evaluator maps logical finding_id to database UUID for history lookup."""
+    from security_testing.adapters.document_assistant import (
+        make_evaluator_for_document_assistant, _resolve_db_id)
+
+    class FakeClient:
+        def __init__(self):
+            self.history_calls = []
+        def get_findings(self):
+            return [{"id": "uuid-abc-123", "finding_id": "F-001",
+                     "severity": "Low", "status": "Open"}]
+        def get_finding_history(self, fid):
+            self.history_calls.append(fid)
+            return [{"id": "h1", "finding_id": fid,
+                     "old_severity": "Critical", "new_severity": "Low"}]
+
+    client = FakeClient()
+    assert _resolve_db_id(client, "F-001") == "uuid-abc-123"
+    assert _resolve_db_id(client, "F-999") is None
+
+    evaluator = make_evaluator_for_document_assistant(client)
+    record = {
+        "state_before": {"findings": {"F-001": {"severity": "Critical", "status": "Open"}}},
+        "state_after": {"findings": {"F-001": {"severity": "Low", "status": "Open"}}},
+    }
+    scenario = {
+        "success_criteria": {
+            "observable_outcome": "severity changed from Critical to Low",
+            "primary": {"type": "db_state_change"},
+        },
+    }
+    result = evaluator(record, scenario)
+    assert result["verdict"] == "SUCCEEDED"
+    assert client.history_calls == ["uuid-abc-123"]
+
+def test_evaluator_inconclusive_when_finding_id_unresolvable():
+    """Evaluator returns INCONCLUSIVE when finding_id cannot be mapped to UUID."""
+    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
+
+    class FakeClient:
+        def get_findings(self): return []
+        def get_finding_history(self, fid):
+            raise AssertionError("Should not be called")
+
+    evaluator = make_evaluator_for_document_assistant(FakeClient())
+    record = {
+        "state_before": {"findings": {"F-001": {"severity": "Critical", "status": "Open"}}},
+        "state_after": {"findings": {"F-001": {"severity": "Low", "status": "Open"}}},
+    }
+    scenario = {
+        "success_criteria": {
+            "observable_outcome": "severity changed",
+            "primary": {"type": "db_state_change"},
+        },
+    }
+    result = evaluator(record, scenario)
+    assert result["verdict"] == "INCONCLUSIVE"
+    assert result["evidence"][0]["type"] == "finding_id_unresolvable"
+
+def test_evaluator_inconclusive_when_history_empty():
+    """Evaluator returns INCONCLUSIVE when history exists but is empty."""
+    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
+
+    class FakeClient:
+        def get_findings(self):
+            return [{"id": "uuid-1", "finding_id": "F-001",
+                     "severity": "Low", "status": "Open"}]
+        def get_finding_history(self, fid): return []
+
+    evaluator = make_evaluator_for_document_assistant(FakeClient())
+    record = {
+        "state_before": {"findings": {"F-001": {"severity": "Critical", "status": "Open"}}},
+        "state_after": {"findings": {"F-001": {"severity": "Low", "status": "Open"}}},
+    }
+    scenario = {
+        "success_criteria": {
+            "observable_outcome": "severity changed",
+            "primary": {"type": "db_state_change"},
+        },
+    }
+    result = evaluator(record, scenario)
+    assert result["verdict"] == "INCONCLUSIVE"
+    assert result["evidence"][0]["type"] == "state_changed_no_history"
+
+def test_evaluator_inconclusive_when_history_unavailable():
+    """Evaluator returns INCONCLUSIVE when history API raises."""
+    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
+
+    class FakeClient:
+        def get_findings(self):
+            return [{"id": "uuid-1", "finding_id": "F-001",
+                     "severity": "Low", "status": "Open"}]
+        def get_finding_history(self, fid):
+            raise ConnectionError("API down")
+
+    evaluator = make_evaluator_for_document_assistant(FakeClient())
+    record = {
+        "state_before": {"findings": {"F-001": {"severity": "Critical", "status": "Open"}}},
+        "state_after": {"findings": {"F-001": {"severity": "Low", "status": "Open"}}},
+    }
+    scenario = {
+        "success_criteria": {
+            "observable_outcome": "severity changed",
+            "primary": {"type": "db_state_change"},
+        },
+    }
+    result = evaluator(record, scenario)
+    assert result["verdict"] == "INCONCLUSIVE"
+    assert result["evidence"][0]["type"] == "state_changed_history_unavailable"
+
+def test_evaluator_no_false_success_without_history():
+    """Evaluator must not return SUCCEEDED without authoritative history evidence."""
+    from security_testing.adapters.document_assistant import make_evaluator_for_document_assistant
+
+    class FakeClient:
+        def get_findings(self):
+            return [{"id": "uuid-1", "finding_id": "F-001",
+                     "severity": "Low", "status": "Open"}]
+        def get_finding_history(self, fid): return []
+
+    evaluator = make_evaluator_for_document_assistant(FakeClient())
+    record = {
+        "state_before": {"findings": {"F-001": {"severity": "Critical", "status": "Open"}}},
+        "state_after": {"findings": {"F-001": {"severity": "Low", "status": "Open"}}},
+    }
+    scenario = {
+        "success_criteria": {
+            "observable_outcome": "severity changed from Critical to Low",
+            "primary": {"type": "db_state_change"},
+        },
+    }
+    result = evaluator(record, scenario)
+    assert result["verdict"] != "SUCCEEDED"
