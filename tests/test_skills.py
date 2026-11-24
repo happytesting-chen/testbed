@@ -227,6 +227,149 @@ def test_document_assistant_adapter_importable():
     assert make_evaluator_for_document_assistant is not None
 
 
+# ── Access policy tests ──────────────────────────────────────────────────────
+
+def test_access_policy_black_box_blocks_traces():
+    from security_testing.access_policy import AccessPolicy
+    policy = AccessPolicy("black_box")
+    assert not policy.can_access_traces
+    assert not policy.can_access_source
+    trace = {"run": {"id": "r1"}, "events": [
+        {"seq": 1, "stage": "llm_request", "ts": "t", "payload": {"body": "secret"}},
+        {"seq": 2, "stage": "tool_call", "ts": "t", "payload": {"name": "read"}},
+    ]}
+    filtered = policy.filter_trace(trace)
+    assert filtered == {}
+
+
+def test_access_policy_grey_box_filters_traces():
+    from security_testing.access_policy import AccessPolicy
+    policy = AccessPolicy("grey_box")
+    assert policy.can_access_traces
+    assert not policy.can_access_source
+    trace = {"run": {"id": "r1", "model": "test"}, "events": [
+        {"seq": 1, "stage": "llm_request", "ts": "t", "payload": {"body": {"messages": ["secret"]}}},
+        {"seq": 2, "stage": "tool_call", "ts": "t", "payload": {"name": "read_report", "step": 1, "agent": "reader"}},
+        {"seq": 3, "stage": "shadow_violation", "ts": "t", "payload": {"vuln_id": "IA2-01"}},
+        {"seq": 4, "stage": "delegation", "ts": "t", "payload": {"to_agent": "fm", "task": "update", "context": "raw"}},
+    ]}
+    filtered = policy.filter_trace(trace)
+    stages = [e["stage"] for e in filtered["events"]]
+    assert "llm_request" not in stages
+    assert "shadow_violation" not in stages
+    assert "tool_call" in stages
+    assert "delegation" in stages
+    tc = next(e for e in filtered["events"] if e["stage"] == "tool_call")
+    assert "name" in tc["payload"]
+    assert "arguments" not in tc.get("payload", {})
+    deleg = next(e for e in filtered["events"] if e["stage"] == "delegation")
+    assert "context" not in deleg["payload"]
+
+
+def test_access_policy_white_box_strips_evaluator_events():
+    from security_testing.access_policy import AccessPolicy
+    policy = AccessPolicy("white_box")
+    assert policy.can_access_traces
+    assert policy.can_access_source
+    trace = {"run": {"id": "r1", "agent_config": {"secret": True}}, "events": [
+        {"seq": 1, "stage": "llm_request", "ts": "t", "payload": {"body": "ok"}},
+        {"seq": 2, "stage": "shadow_violation", "ts": "t", "payload": {"vuln_id": "IA2-01"}},
+        {"seq": 3, "stage": "scope_grant", "ts": "t", "payload": {"grant_id": "g1"}},
+        {"seq": 4, "stage": "tool_call", "ts": "t", "payload": {"name": "read"}},
+    ]}
+    filtered = policy.filter_trace(trace)
+    stages = [e["stage"] for e in filtered["events"]]
+    assert "shadow_violation" not in stages
+    assert "scope_grant" not in stages
+    assert "llm_request" in stages
+    assert "tool_call" in stages
+    assert "agent_config" not in filtered.get("run", {})
+
+
+def test_access_policy_strips_evaluator_from_scenario():
+    from security_testing.access_policy import AccessPolicy
+    for mode in ("black_box", "grey_box", "white_box"):
+        policy = AccessPolicy(mode)
+        scenario = {"id": "T1", "objective": "test", "_evaluator": {"secret": True}}
+        filtered = policy.filter_scenario(scenario)
+        assert "_evaluator" not in filtered, f"{mode} should strip _evaluator"
+        assert "objective" in filtered
+
+
+def test_runner_records_access_mode(tmp_path):
+    from security_testing.red_team import RedTeamRunner
+
+    class MockTarget:
+        def chat(self, message, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, filename, content):
+            return {"id": "u1"}
+        def snapshot_state(self):
+            return {}
+
+    for mode in ("black_box", "grey_box", "white_box"):
+        runner = RedTeamRunner(target=MockTarget(), access_mode=mode,
+                               records_dir=str(tmp_path / mode))
+        baseline = runner.run_baseline({"id": "T1", "legitimate_task": "test"})
+        assert baseline["access_mode"] == mode
+        record = runner.execute_attempt(
+            {"id": "T1", "attacker": {"entry_point": {}}, "success_criteria": {}},
+            technique_id="PI-001", chat_message="test", attempt=1)
+        assert record["access_mode"] == mode
+
+
+def test_runner_black_box_no_trace_in_record(tmp_path):
+    from security_testing.red_team import RedTeamRunner
+
+    class MockTarget:
+        def chat(self, message, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, filename, content):
+            return {"id": "u1"}
+        def snapshot_state(self):
+            return {}
+
+    def mock_trace_provider(run_id):
+        return {"run": {"id": run_id}, "events": [{"stage": "llm_request", "payload": {}}]}
+
+    runner = RedTeamRunner(target=MockTarget(), access_mode="black_box",
+                           trace_provider=mock_trace_provider,
+                           records_dir=str(tmp_path / "records"))
+    record = runner.execute_attempt(
+        {"id": "T1", "attacker": {"entry_point": {}}, "success_criteria": {}},
+        technique_id="PI-001", chat_message="test", attempt=1)
+    assert "trace" not in record
+
+
+def test_runner_grey_box_has_filtered_trace(tmp_path):
+    from security_testing.red_team import RedTeamRunner
+
+    class MockTarget:
+        def chat(self, message, run_tag=None):
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, filename, content):
+            return {"id": "u1"}
+        def snapshot_state(self):
+            return {}
+
+    def mock_trace_provider(run_id):
+        return {"run": {"id": run_id, "model": "test"}, "events": [
+            {"seq": 1, "stage": "llm_request", "ts": "t", "payload": {"body": "secret"}},
+            {"seq": 2, "stage": "tool_call", "ts": "t", "payload": {"name": "read", "step": 1, "agent": "reader"}},
+        ]}
+
+    runner = RedTeamRunner(target=MockTarget(), access_mode="grey_box",
+                           trace_provider=mock_trace_provider,
+                           records_dir=str(tmp_path / "records"))
+    record = runner.execute_attempt(
+        {"id": "T1", "attacker": {"entry_point": {}}, "success_criteria": {}},
+        technique_id="PI-001", chat_message="test", attempt=1)
+    assert "trace" in record
+    stages = [e["stage"] for e in record["trace"]["events"]]
+    assert "tool_call" in stages
+    assert "llm_request" not in stages
+
+
 def test_scenario_loader_attacker_view_strips_evaluator():
     """The attacker-view loader must strip _evaluator sections."""
     from security_testing.scenario_loader import load_scenario, load_scenario_attacker_view

@@ -20,20 +20,30 @@ import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .access_policy import AccessPolicy
+
 
 class RedTeamRunner:
     """Generic red-team execution engine."""
 
     def __init__(self, target, evaluator=None,
+                 access_mode: str = "black_box",
+                 trace_provider=None,
                  records_dir: str = "security_testing/records"):
         """
         Args:
             target: object with chat(), upload(), snapshot_state() methods
             evaluator: callable(record, criteria) -> dict with "verdict" key
+                       (independent of access_mode — always has full access)
+            access_mode: "black_box", "grey_box", or "white_box"
+            trace_provider: callable(run_id) -> dict (raw trace); only used
+                            when access_mode allows traces
             records_dir: directory for saving records
         """
         self.target = target
         self.evaluator = evaluator or self._default_evaluator
+        self.policy = AccessPolicy(access_mode)
+        self.trace_provider = trace_provider
         self.records_dir = Path(records_dir)
         self.records_dir.mkdir(parents=True, exist_ok=True)
 
@@ -48,6 +58,7 @@ class RedTeamRunner:
         record = {
             "scenario_id": sid,
             "phase": "baseline",
+            "access_mode": self.policy.mode,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "legitimate_task": task,
             "state_before": state_before,
@@ -83,6 +94,7 @@ class RedTeamRunner:
         record = {
             "scenario_id": sid,
             "phase": "discovery",
+            "access_mode": self.policy.mode,
             "attempt": attempt,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "technique_id": technique_id,
@@ -111,6 +123,15 @@ class RedTeamRunner:
                 record["response_preview"] = result.get("response", "")[:500]
 
             record["state_after"] = self.target.snapshot_state()
+
+            # Fetch trace if access mode permits and provider available
+            if self.policy.can_access_traces and self.trace_provider and record.get("run_id"):
+                try:
+                    raw_trace = self.trace_provider(record["run_id"])
+                    record["trace"] = self.policy.filter_trace(raw_trace)
+                except Exception:
+                    record["trace"] = {"unavailable": True}
+
             verdict = self.evaluator(record, criteria)
             record["verdict"] = verdict.get("verdict", "INCONCLUSIVE")
             record["evidence"] = verdict.get("evidence", [])
@@ -148,6 +169,7 @@ class RedTeamRunner:
             record = {
                 "scenario_id": sid,
                 "phase": "validation",
+                "access_mode": self.policy.mode,
                 "validation_run": i,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "technique_id": technique_id,
@@ -203,8 +225,7 @@ class RedTeamRunner:
 
     def generate_summary(self, scenario: dict, baseline: dict,
                          discovery_records: list[dict],
-                         validation: dict | None = None,
-                         testing_mode: str = "black_box") -> dict:
+                         validation: dict | None = None) -> dict:
         """Generate the final scenario summary."""
         sid = scenario["id"]
         first_success = next(
@@ -214,7 +235,8 @@ class RedTeamRunner:
             "scenario_id": sid,
             "related_risk_ids": scenario.get("related_risk_ids", []),
             "objective": scenario.get("objective", ""),
-            "testing_mode": testing_mode,
+            "access_mode": self.policy.mode,
+            "access_policy": self.policy.to_dict(),
             "baseline": {
                 "response_preview": baseline.get("response_preview", ""),
                 "state_snapshot": baseline.get("state_before", {}),
