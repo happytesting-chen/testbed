@@ -9,7 +9,21 @@ _scripts = str(Path(__file__).resolve().parent.parent / ".claude" / "skills" / "
 if _scripts not in sys.path:
     sys.path.insert(0, _scripts)
 
-from runner import RedTeamRunner, ScenarioValidationError, _hash
+from runner import RedTeamRunner, ScenarioValidationError, _hash, _attack_inputs_hash
+
+
+def _make_frozen(runner, technique_id="PI-001", payload_content=None,
+                 payload_filename=None, chat_message=None):
+    """Register a verified success and return a valid frozen attack dict."""
+    h = _attack_inputs_hash(technique_id, payload_content, payload_filename, chat_message)
+    runner._verified_successes.add(h)
+    return {
+        "technique_id": technique_id,
+        "payload_content": payload_content,
+        "payload_filename": payload_filename,
+        "chat_message": chat_message,
+        "_integrity_hash": h,
+    }
 
 
 class MockTarget:
@@ -197,7 +211,7 @@ def test_validation_runs_stripped(tmp_path):
                 "evidence": [{"type": "auth_check", "token": SECRET}]}
     runner = RedTeamRunner(target=MockTarget(), evaluator=mock_eval,
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=2)
     for run in result["runs"]:
         run_text = json.dumps(run)
@@ -248,7 +262,7 @@ def test_valid_reset_and_state_restored(tmp_path):
         return {"verdict": "FAILED", "evidence": []}
     runner = RedTeamRunner(target=target, evaluator=always_fail,
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=3,
                                    reset_fn=lambda: None,
                                    expected_state=state)
@@ -274,7 +288,7 @@ def test_reset_succeeds_but_state_not_restored(tmp_path):
             return {"findings": {"f1": {"severity": "Low"}}}
 
     runner = RedTeamRunner(target=DriftingTarget(), records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     expected = {"findings": {"f1": {"severity": "Critical"}}}
     result = runner.run_validation(APPROVED, frozen, repeat_count=3,
                                    reset_fn=lambda: None,
@@ -289,7 +303,7 @@ def test_reset_succeeds_but_state_not_restored(tmp_path):
 def test_reset_raises_exception(tmp_path):
     """Reset raises → ERROR, excluded from both ASR calculations."""
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=3,
                                    reset_fn=lambda: (_ for _ in ()).throw(RuntimeError("broken")))
     assert result["errors"] == 3
@@ -303,7 +317,7 @@ def test_no_reset_not_independent(tmp_path):
         return {"verdict": "FAILED", "evidence": []}
     runner = RedTeamRunner(target=MockTarget(), evaluator=always_fail,
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=3)
     assert result["independently_validated"] is False
     assert result["independent_asr"] is None
@@ -327,7 +341,7 @@ def test_asr_excludes_unverified_runs(tmp_path):
             return state_ok
 
     runner = RedTeamRunner(target=FlickerTarget(), records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=5,
                                    reset_fn=lambda: None,
                                    expected_state=state_ok)
@@ -350,7 +364,7 @@ def test_session_cleared_between_validation_runs(tmp_path):
     def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
     runner = RedTeamRunner(target=SessionTarget(), evaluator=fail_eval,
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     runner.run_validation(APPROVED, frozen, repeat_count=3)
     assert session_clears["count"] == 3
 
@@ -396,7 +410,7 @@ def test_reset_fn_with_seed_restores_findings(tmp_path):
     def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
     runner = RedTeamRunner(target=target, evaluator=fail_eval,
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=3,
                                    reset_fn=reset, expected_state=expected)
     assert result["independently_validated"] is True
@@ -425,7 +439,7 @@ def test_residual_reports_detected(tmp_path):
     def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
     runner = RedTeamRunner(target=target, evaluator=fail_eval,
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=3,
                                    reset_fn=lambda: None,
                                    expected_state=expected)
@@ -456,7 +470,7 @@ def test_scope_grants_cleared_by_reset(tmp_path):
     def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
     runner = RedTeamRunner(target=target, evaluator=fail_eval,
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PE-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, technique_id="PE-001", chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=3,
                                    reset_fn=reset, expected_state=expected)
     assert result["independently_validated"] is True
@@ -464,15 +478,16 @@ def test_scope_grants_cleared_by_reset(tmp_path):
 
 def test_frozen_attack_includes_all_inputs(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "payload_content": "doc",
-              "payload_filename": "attack.md", "chat_message": "summarise"}
+    frozen = _make_frozen(runner, payload_content="doc",
+                          payload_filename="attack.md", chat_message="summarise")
     result = runner.run_validation(APPROVED, frozen, repeat_count=2)
-    assert result["frozen_payload_hash"] == _hash("doc")
+    expected_hash = _attack_inputs_hash("PI-001", "doc", "attack.md", "summarise")
+    assert result["frozen_payload_hash"] == expected_hash
     assert result["repetitions"] == 2
 
 def test_no_reset_marked_not_independent_legacy(tmp_path):
     runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=2)
     assert result["independently_validated"] is False
     assert result["independent_asr"] is None
@@ -485,7 +500,7 @@ def test_reset_failures_excluded_legacy(tmp_path):
         if n["c"] <= 2: raise RuntimeError("fail")
     runner = RedTeamRunner(target=MockTarget(state=state),
                            records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=5,
                                    reset_fn=bad_reset, expected_state=state)
     assert result["errors"] >= 2
@@ -634,8 +649,8 @@ def test_validation_rejects_unauthorized_upload(tmp_path):
     """Frozen attack with upload rejected during validation."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "payload_content": "malicious",
-              "payload_filename": "attack.md", "chat_message": "go"}
+    frozen = _make_frozen(runner, payload_content="malicious",
+                          payload_filename="attack.md", chat_message="go")
     with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
         runner.run_validation(CHAT_ONLY, frozen, repeat_count=1)
     assert len(target.uploads) == 0
@@ -645,7 +660,7 @@ def test_validation_rejects_unauthorized_chat(tmp_path):
     """Frozen attack with chat rejected during validation."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "attack"}
+    frozen = _make_frozen(runner, chat_message="attack")
     with pytest.raises(ScenarioValidationError, match="Chat not permitted"):
         runner.run_validation(UPLOAD_ONLY, frozen, repeat_count=1)
     assert len(target.chats) == 0
@@ -654,7 +669,7 @@ def test_validation_allows_authorized_actions(tmp_path):
     """Frozen attack matching permitted_actions executes normally in validation."""
     target = MockTarget()
     runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
-    frozen = {"technique_id": "PI-001", "chat_message": "test"}
+    frozen = _make_frozen(runner, chat_message="test")
     result = runner.run_validation(APPROVED, frozen, repeat_count=2)
     assert result["repetitions"] == 2
 
@@ -831,3 +846,169 @@ def test_evaluator_no_false_success_without_history():
     }
     result = evaluator(record, scenario)
     assert result["verdict"] != "SUCCEEDED"
+
+
+# ── Issue 4: Frozen attack integrity ─────────────────────────────────────────
+
+def test_freeze_successful_discovery(tmp_path):
+    """A SUCCEEDED discovery attack can be frozen and validated."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="attack")
+    assert record["verdict"] == "SUCCEEDED"
+    frozen = runner.freeze_attack(record)
+    assert frozen["technique_id"] == "PI-001"
+    assert frozen["chat_message"] == "attack"
+    assert "_integrity_hash" in frozen
+    result = runner.run_validation(APPROVED, frozen, repeat_count=2)
+    assert result["repetitions"] == 2
+
+def test_freeze_failed_discovery_rejected(tmp_path):
+    """A FAILED discovery attack cannot be frozen."""
+    def fail_eval(r, s): return {"verdict": "FAILED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=fail_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="attempt")
+    assert record["verdict"] == "FAILED"
+    with pytest.raises(ScenarioValidationError, match="not SUCCEEDED"):
+        runner.freeze_attack(record)
+
+def test_freeze_inconclusive_discovery_rejected(tmp_path):
+    """An INCONCLUSIVE discovery attack cannot be frozen."""
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="try")
+    assert record["verdict"] == "INCONCLUSIVE"
+    with pytest.raises(ScenarioValidationError, match="not SUCCEEDED"):
+        runner.freeze_attack(record)
+
+def test_arbitrary_dict_rejected_by_validation(tmp_path):
+    """An arbitrary dict without integrity hash is rejected."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    arbitrary = {"technique_id": "PI-001", "chat_message": "test"}
+    with pytest.raises(ScenarioValidationError, match="integrity hash"):
+        runner.run_validation(APPROVED, arbitrary, repeat_count=1)
+    assert len(target.chats) == 0
+
+def test_unverified_hash_rejected_by_validation(tmp_path):
+    """A dict with a hash not from a verified success is rejected."""
+    target = MockTarget()
+    runner = RedTeamRunner(target=target, records_dir=str(tmp_path / "r"))
+    fake = {
+        "technique_id": "PI-001", "chat_message": "test",
+        "payload_content": None, "payload_filename": None,
+        "_integrity_hash": _attack_inputs_hash("PI-001", None, None, "test"),
+    }
+    with pytest.raises(ScenarioValidationError, match="verified successful discovery"):
+        runner.run_validation(APPROVED, fake, repeat_count=1)
+    assert len(target.chats) == 0
+
+def test_modified_payload_content_rejected(tmp_path):
+    """Modified payload_content after freezing is rejected."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001",
+                                     payload_content="original", chat_message="go")
+    frozen = runner.freeze_attack(record)
+    frozen["payload_content"] = "MODIFIED"
+    with pytest.raises(ScenarioValidationError, match="modified after freezing"):
+        runner.run_validation(APPROVED, frozen, repeat_count=1)
+
+def test_modified_payload_filename_rejected(tmp_path):
+    """Modified payload_filename after freezing is rejected."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001",
+                                     payload_content="doc",
+                                     payload_filename="original.md",
+                                     chat_message="go")
+    frozen = runner.freeze_attack(record)
+    frozen["payload_filename"] = "tampered.md"
+    with pytest.raises(ScenarioValidationError, match="modified after freezing"):
+        runner.run_validation(APPROVED, frozen, repeat_count=1)
+
+def test_modified_chat_message_rejected(tmp_path):
+    """Modified chat_message after freezing is rejected."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="original")
+    frozen = runner.freeze_attack(record)
+    frozen["chat_message"] = "TAMPERED"
+    with pytest.raises(ScenarioValidationError, match="modified after freezing"):
+        runner.run_validation(APPROVED, frozen, repeat_count=1)
+
+def test_modified_technique_id_rejected(tmp_path):
+    """Modified technique_id after freezing is rejected."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="go")
+    frozen = runner.freeze_attack(record)
+    frozen["technique_id"] = "PI-999"
+    with pytest.raises(ScenarioValidationError, match="modified after freezing"):
+        runner.run_validation(APPROVED, frozen, repeat_count=1)
+
+def test_frozen_attack_identical_across_all_runs(tmp_path):
+    """The same frozen inputs execute across every validation repetition."""
+    executed = []
+    class TrackingTarget:
+        def chat(self, message, run_tag=None):
+            executed.append(message)
+            return {"run_id": "r1", "response": "ok"}
+        def upload(self, filename, content):
+            executed.append(("upload", filename, content))
+            return {"id": "u1"}
+        def snapshot_state(self): return {}
+
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=TrackingTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001",
+                                     payload_content="doc",
+                                     payload_filename="a.md",
+                                     chat_message="go")
+    frozen = runner.freeze_attack(record)
+    executed.clear()
+    runner.run_validation(APPROVED, frozen, repeat_count=3)
+    chats = [e for e in executed if isinstance(e, str)]
+    uploads = [e for e in executed if isinstance(e, tuple)]
+    assert all(c == "go" for c in chats)
+    assert all(u == ("upload", "a.md", "doc") for u in uploads)
+    assert len(chats) == 3
+    assert len(uploads) == 3
+
+def test_freeze_non_discovery_record_rejected(tmp_path):
+    """Cannot freeze a baseline or validation record."""
+    runner = RedTeamRunner(target=MockTarget(), records_dir=str(tmp_path / "r"))
+    baseline = runner.run_baseline(APPROVED)
+    with pytest.raises(ScenarioValidationError, match="not a discovery"):
+        runner.freeze_attack(baseline)
+
+def test_scope_still_enforced_with_frozen_attack(tmp_path):
+    """Scope restrictions apply even to properly frozen attacks."""
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001",
+                                     payload_content="doc", chat_message="go")
+    frozen = runner.freeze_attack(record)
+    with pytest.raises(ScenarioValidationError, match="Upload not permitted"):
+        runner.run_validation(CHAT_ONLY, frozen, repeat_count=1)
+
+def test_reset_and_asr_work_with_frozen_attack(tmp_path):
+    """Independent reset and ASR calculations work with freeze_attack flow."""
+    state = {"findings": {"f1": {"severity": "Critical"}}}
+    def ok_eval(r, s): return {"verdict": "SUCCEEDED", "evidence": []}
+    runner = RedTeamRunner(target=MockTarget(state=state), evaluator=ok_eval,
+                           records_dir=str(tmp_path / "r"))
+    record = runner.execute_attempt(APPROVED, "PI-001", chat_message="attack")
+    frozen = runner.freeze_attack(record)
+    result = runner.run_validation(APPROVED, frozen, repeat_count=3,
+                                   reset_fn=lambda: None,
+                                   expected_state=state)
+    assert result["independently_validated"] is True
+    assert result["independent_asr"] == 1.0

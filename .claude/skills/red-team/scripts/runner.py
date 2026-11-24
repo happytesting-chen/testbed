@@ -42,6 +42,7 @@ class RedTeamRunner:
         self.repeat_count = max(1, repeat_count)
         self._discovery_count = 0
         self._run_id = uuid.uuid4().hex[:8]
+        self._verified_successes = set()
 
     # ── Scenario validation ───────────────────────────────────────────────────
 
@@ -174,6 +175,13 @@ class RedTeamRunner:
             # Evaluator evidence stored with _ prefix — stripped by _attacker_view and _save
             record["_evaluator_evidence"] = verdict.get("evidence", [])
 
+            if record["verdict"] == "SUCCEEDED":
+                h = _attack_inputs_hash(
+                    technique_id, payload_content,
+                    payload_filename if payload_content else None,
+                    chat_message)
+                self._verified_successes.add(h)
+
         except Exception as exc:
             record["error"] = str(exc)
             record["verdict"] = "ERROR"
@@ -181,6 +189,50 @@ class RedTeamRunner:
         # Save two versions: full (for reporting) and attacker-visible
         self._save(record, f"{sid}_{self._run_id}_attempt_{attempt}.json")
         return self._attacker_view(record)
+
+    # ── Freeze successful attack ────────────────────────────────────────────
+
+    def freeze_attack(self, discovery_record: dict) -> dict:
+        """Create a frozen attack from an evaluator-confirmed successful discovery.
+
+        Args:
+            discovery_record: the attacker-visible record returned by execute_attempt()
+
+        Returns:
+            Frozen attack dict with all execution-relevant inputs and an
+            integrity hash linking it to the verified discovery.
+
+        Raises:
+            ScenarioValidationError if the record is not a verified SUCCEEDED
+            discovery from this runner instance.
+        """
+        if discovery_record.get("phase") != "discovery":
+            raise ScenarioValidationError(
+                "Cannot freeze: not a discovery record")
+        if discovery_record.get("verdict") != "SUCCEEDED":
+            raise ScenarioValidationError(
+                "Cannot freeze: verdict is not SUCCEEDED")
+
+        payload = discovery_record.get("payload", {})
+        technique_id = discovery_record.get("technique_id")
+        payload_content = payload.get("content")
+        payload_filename = payload.get("filename")
+        chat_message = discovery_record.get("chat_message")
+
+        integrity_hash = _attack_inputs_hash(
+            technique_id, payload_content, payload_filename, chat_message)
+
+        if integrity_hash not in self._verified_successes:
+            raise ScenarioValidationError(
+                "Cannot freeze: no verified successful discovery matches these inputs")
+
+        return {
+            "technique_id": technique_id,
+            "payload_content": payload_content,
+            "payload_filename": payload_filename,
+            "chat_message": chat_message,
+            "_integrity_hash": integrity_hash,
+        }
 
     # ── Step 7: Repeat Validation ─────────────────────────────────────────────
 
@@ -191,11 +243,16 @@ class RedTeamRunner:
         """Repeat the exact frozen attack inputs.
 
         Args:
-            frozen_attack: dict with technique_id, payload_content,
-                          payload_filename, chat_message
+            frozen_attack: dict produced by freeze_attack() — includes
+                          technique_id, payload_content, payload_filename,
+                          chat_message, and _integrity_hash
             reset_fn: callable that restores the target to initial conditions
             expected_state: snapshot of the expected initial state; if None,
                            captured from the target before validation starts
+
+        Raises:
+            ScenarioValidationError if frozen_attack was not produced by
+            freeze_attack() or its inputs have been modified.
         """
         self.validate_scenario(scenario)
         self._validate_actions(
@@ -203,9 +260,29 @@ class RedTeamRunner:
             has_upload=bool(frozen_attack.get("payload_content")),
             has_chat=bool(frozen_attack.get("chat_message")),
         )
+
+        # Verify frozen attack integrity
+        stored_hash = frozen_attack.get("_integrity_hash")
+        if not stored_hash:
+            raise ScenarioValidationError(
+                "Frozen attack missing integrity hash — use freeze_attack()")
+        computed_hash = _attack_inputs_hash(
+            frozen_attack.get("technique_id"),
+            frozen_attack.get("payload_content"),
+            frozen_attack.get("payload_filename"),
+            frozen_attack.get("chat_message"),
+        )
+        if computed_hash != stored_hash:
+            raise ScenarioValidationError(
+                "Frozen attack inputs modified after freezing "
+                f"(expected {stored_hash}, got {computed_hash})")
+        if stored_hash not in self._verified_successes:
+            raise ScenarioValidationError(
+                "Frozen attack does not match any verified successful discovery")
+
         sid = scenario["id"]
         count = repeat_count or self.repeat_count
-        frozen_hash = _hash(frozen_attack.get("payload_content"))
+        frozen_hash = computed_hash
         has_reset = reset_fn is not None
 
         # Capture expected initial state if not provided
@@ -390,3 +467,14 @@ def _now():
 
 def _hash(content):
     return hashlib.sha256((content or "").encode()).hexdigest()[:16]
+
+
+def _attack_inputs_hash(technique_id, payload_content, payload_filename, chat_message):
+    """Deterministic hash over all execution-relevant attack inputs."""
+    canonical = json.dumps({
+        "technique_id": technique_id,
+        "payload_content": payload_content,
+        "payload_filename": payload_filename,
+        "chat_message": chat_message,
+    }, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]

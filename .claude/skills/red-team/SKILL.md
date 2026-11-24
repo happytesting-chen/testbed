@@ -121,10 +121,9 @@ record = runner.execute_attempt(scenario, technique_id="PI-001",
                                 payload_content="...", chat_message="...")
 # Returns attacker-visible record only — evaluator evidence is separate
 
-# After first success, freeze and validate
+# After first success, freeze the verified record and validate
 if record["verdict"] == "SUCCEEDED":
-    frozen = {"technique_id": "PI-001", "payload_content": "...",
-              "payload_filename": "attack.md", "chat_message": "..."}
+    frozen = runner.freeze_attack(record)
     validation = runner.run_validation(scenario, frozen, reset_fn=reset)
 
 # Generate summary
