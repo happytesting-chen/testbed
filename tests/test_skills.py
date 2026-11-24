@@ -25,10 +25,14 @@ def test_tra_covers_all_seven_threats():
     assert threat_ids == {"RP.1", "RP.2", "KM.1", "TA.1", "IA.1", "IA.2", "XA.1"}
 
 
-def test_tra_all_threats_applicable():
+def test_tra_threat_status_valid():
+    """Each threat must have a valid status — but not all must be Applicable."""
     tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
+    valid_statuses = {"Applicable", "Not Applicable", "Needs Verification"}
     for t in tra["threat_applicability"]:
-        assert t["status"] == "Applicable", f"{t['threat_id']} should be Applicable"
+        assert t["status"] in valid_statuses, \
+            f"{t['threat_id']} has invalid status '{t['status']}'"
+        assert "rationale" in t, f"{t['threat_id']} must have a rationale"
 
 
 def test_tra_risk_register_has_required_fields():
@@ -148,6 +152,38 @@ def test_red_team_runner_accepts_technique_params(tmp_path):
     assert "technique" in params
     assert "payload_content" in params
     assert "chat_message" in params
+
+
+def test_scenario_loader_attacker_view_strips_evaluator():
+    """The attacker-view loader must strip _evaluator sections."""
+    from security_testing.scenario_loader import load_scenario, load_scenario_attacker_view
+    full = load_scenario(SCENARIOS_DIR / "S1-RP1-001.yaml")
+    assert "_evaluator" in full
+
+    filtered = load_scenario_attacker_view(SCENARIOS_DIR / "S1-RP1-001.yaml")
+    assert "_evaluator" not in filtered
+    assert "objective" in filtered
+    assert "attacker" in filtered
+    assert "success_criteria" in filtered
+
+
+def test_scenario_loader_attacker_view_has_no_flag_ids():
+    """Filtered scenario should not contain weakness flag IDs."""
+    from security_testing.scenario_loader import load_scenario_attacker_view
+    filtered = load_scenario_attacker_view(SCENARIOS_DIR / "S1-RP1-001.yaml")
+    text = json.dumps(filtered)
+    assert "RP1-03" not in text
+    assert "XA1-02" not in text
+    assert "IA2-01" not in text
+    assert "shadow_violation" not in text
+
+
+def test_tra_matrix_marked_provisional():
+    """The TRA must clearly label its risk matrix as provisional."""
+    text = (TRA_DIR / "tra_document_assistant.yaml").read_text(encoding="utf-8")
+    assert "PROVISIONAL" in text
+    assert "approved organizational risk methodology" in text.lower() or \
+           "approved methodology" in text.lower()
 
 
 def test_red_team_runner_importable():

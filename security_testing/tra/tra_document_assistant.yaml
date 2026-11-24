@@ -20,14 +20,18 @@ target:
     - "Agent system prompts and configuration"
 
 # Risk assessment methodology:
+#   STATUS: PROVISIONAL — no approved organizational risk methodology has been provided.
+#   This matrix is used as a default until an approved methodology is adopted.
+#   Replace with the organization's standard risk framework when available.
+#
 #   Preliminary Likelihood: Unlikely / Possible / Likely / Almost certain
 #     Based on architectural analysis. Marked "Preliminary" when not confirmed by testing.
 #   Impact: Low / Medium / High / Critical
 #     Based on potential security consequences to the assessment process.
-#   Risk Rating: Likelihood × Impact (qualitative, per the matrix below)
-#   Risk Level: Derived from Risk Rating using the standard matrix
+#   Risk Rating: Likelihood × Impact (qualitative, per the provisional matrix below)
+#   Risk Level: Derived from Risk Rating using the provisional matrix
 #
-#   Risk level matrix:
+#   Provisional risk level matrix:
 #     | Likelihood \ Impact | Low    | Medium | High   | Critical |
 #     |---------------------|--------|--------|--------|----------|
 #     | Unlikely            | Low    | Low    | Medium | High     |
