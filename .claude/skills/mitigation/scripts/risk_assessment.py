@@ -38,17 +38,31 @@ def analyze_risk(risk_entry: dict, test_results: list[dict]) -> dict:
     """
     rid = risk_entry["risk_id"]
 
-    if not test_results:
+    # Filter to actual attempt records — exclude summaries and baselines
+    attempts = [r for r in test_results
+                if r.get("phase") in ("discovery", "validation")
+                and "verdict" in r]
+
+    if not attempts:
+        # Check if a summary provides exploitation_status directly
+        summaries = [r for r in test_results if r.get("phase") == "summary"]
+        if summaries and summaries[0].get("exploitation_status"):
+            return {
+                "risk_id": rid,
+                "exploitation_status": summaries[0]["exploitation_status"],
+                "contributing_evidence": [],
+                "analysis": f"Status from Phase B summary: {summaries[0]['exploitation_status']}",
+            }
         return {
             "risk_id": rid,
             "exploitation_status": "not_tested",
             "contributing_evidence": [],
-            "analysis": "No test results available for this risk.",
+            "analysis": "No test attempt records available for this risk.",
         }
 
-    succeeded = [r for r in test_results if r.get("verdict") == "SUCCEEDED"]
-    failed = [r for r in test_results if r.get("verdict") == "FAILED"]
-    inconclusive = [r for r in test_results if r.get("verdict") == "INCONCLUSIVE"]
+    succeeded = [r for r in attempts if r.get("verdict") == "SUCCEEDED"]
+    failed = [r for r in attempts if r.get("verdict") == "FAILED"]
+    inconclusive = [r for r in attempts if r.get("verdict") == "INCONCLUSIVE"]
 
     if succeeded:
         status = "confirmed"
@@ -147,27 +161,26 @@ def assess_residual_risk(risk_entry: dict,
         }
 
     if succeeded == 0 and blocked > 0:
-        # All retests blocked — reduced but not eliminated
+        # All retests blocked — potential reduction, but requires human assessment
         orig_likelihood = risk_entry.get("preliminary_likelihood", "Possible")
         orig_impact_str = risk_entry.get("impact", "")
         orig_impact = _extract_impact(orig_impact_str)
 
-        new_likelihood = _reduce_likelihood(orig_likelihood)
-        new_level = matrix.get((new_likelihood, orig_impact), "Medium")
-
         return {
             "risk_id": rid,
-            "status": "assessed_reduced",
-            "likelihood": new_likelihood,
+            "status": "pending_assessment",
+            "likelihood": None,
             "impact": orig_impact,
-            "risk_rating": f"{new_likelihood} × {orig_impact}",
-            "risk_level": new_level,
+            "risk_rating": None,
+            "risk_level": None,
             "rationale": (f"All {blocked} retest attempts blocked after {len(implemented)} "
-                          f"mitigation(s) implemented. Likelihood reduced from {orig_likelihood} "
-                          f"to {new_likelihood}."),
+                          f"mitigation(s) implemented. Preliminary likelihood was {orig_likelihood}. "
+                          f"Residual likelihood requires human assessment considering control "
+                          f"effectiveness, remaining attack paths, and evidence limitations."),
             "limitations": [
                 "Retesting used previously known payloads — novel attacks may succeed",
                 f"Retest coverage: {total} attempts with {len(implemented)} controls",
+                "Automatic likelihood reduction not applied — requires justified assessment",
             ],
         }
 

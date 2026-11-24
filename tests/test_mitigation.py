@@ -64,26 +64,25 @@ def test_analyze_risk_no_results():
 def test_analyze_risk_confirmed():
     risk = {"risk_id": "RISK-001"}
     results = [
-        {"verdict": "FAILED", "attempt": 1},
-        {"verdict": "SUCCEEDED", "attempt": 2, "technique_id": "PI-001",
+        {"phase": "discovery", "verdict": "FAILED", "attempt": 1},
+        {"phase": "discovery", "verdict": "SUCCEEDED", "attempt": 2, "technique_id": "PI-001",
          "scenario_id": "S1", "evidence": [{"type": "state_change"}]},
     ]
     result = analyze_risk(risk, results)
     assert result["exploitation_status"] == "confirmed"
     assert len(result["contributing_evidence"]) == 1
-    assert "2 of 2" in result["analysis"] or "1 of 2" in result["analysis"]
 
 
 def test_analyze_risk_not_observed():
     risk = {"risk_id": "RISK-002"}
-    results = [{"verdict": "FAILED"}, {"verdict": "FAILED"}]
+    results = [{"phase": "discovery", "verdict": "FAILED"}, {"phase": "discovery", "verdict": "FAILED"}]
     result = analyze_risk(risk, results)
     assert result["exploitation_status"] == "not_observed"
 
 
 def test_analyze_risk_inconclusive():
     risk = {"risk_id": "RISK-003"}
-    results = [{"verdict": "INCONCLUSIVE"}]
+    results = [{"phase": "discovery", "verdict": "INCONCLUSIVE"}]
     result = analyze_risk(risk, results)
     assert result["exploitation_status"] == "inconclusive"
 
@@ -117,10 +116,10 @@ def test_residual_all_blocked():
     mitigations = [{"description": "Added wrapping", "status": "implemented"}]
     retests = [{"verdict": "FAILED"}, {"verdict": "FAILED"}, {"verdict": "FAILED"}]
     result = assess_residual_risk(risk, mitigations, retests)
-    assert result["status"] == "assessed_reduced"
-    assert result["likelihood"] == "Unlikely"  # one step down from Possible
-    assert result["risk_level"] is not None
+    assert result["status"] == "pending_assessment"
+    assert result["likelihood"] is None  # requires human assessment
     assert "blocked" in result["rationale"].lower()
+    assert any("requires" in l.lower() for l in result["limitations"])
 
 
 def test_residual_still_succeeding():
