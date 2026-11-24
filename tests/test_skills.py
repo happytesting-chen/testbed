@@ -435,11 +435,13 @@ def test_evaluator_creates_results_dir(tmp_path):
 
 
 def test_skill_files_exist():
-    """All three skill definition files exist."""
+    """All three skill definition files exist (Threat Model, Red-Team, Mitigation)."""
     root = Path(__file__).parent.parent
     assert (root / ".claude/skills/threat-model/SKILL.md").exists()
     assert (root / ".claude/skills/red-team/SKILL.md").exists()
-    assert (root / ".claude/skills/evaluate/evaluate.md").exists()
+    assert (root / ".claude/skills/mitigation/SKILL.md").exists()
+    assert not (root / ".claude/skills/evaluate").exists(), \
+        "Evaluation is internal to Red-Team, not a separate Skill"
 
 
 def test_threat_model_skill_is_generic():
