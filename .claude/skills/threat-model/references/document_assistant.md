@@ -17,6 +17,8 @@ This file provides target-specific guidance for running the Threat Modeling Skil
 
 Use the bundled default taxonomy (`references/agentic_ai_threat_taxonomy.yaml`).
 
+Seven threats are in scope for this testbed (marked `in_testbed_scope: true` in the taxonomy).
+
 For testbed-specific weakness flag mappings and implementation status, see:
 - `app/weakness_registry.py` — 24 weakness definitions with implementation status and flag keys (testbed-specific, not part of the generic Skill)
 
@@ -26,5 +28,4 @@ For design context:
 
 ## Existing outputs
 
-- `security_testing/tra/tra_document_assistant.yaml` — Current TRA
-- `security_testing/scenarios/S1-RP1-001.yaml` — First test scenario
+- `security_testing/scenarios/S1-RP1-001.yaml` — First test scenario (approved, live-tested)

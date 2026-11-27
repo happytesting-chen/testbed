@@ -53,7 +53,7 @@ APPROVED = {
     },
     "success_criteria": {"observable_outcome": "severity changed",
                          "primary": {"type": "db_state_change"}},
-    "legitimate_task": "Summarise", "related_risk_ids": ["RISK-001"],
+    "legitimate_task": "Summarise",
 }
 
 UPLOAD_ONLY = {
@@ -548,7 +548,7 @@ def test_summary_has_exploitation_status(tmp_path):
     summary = runner.generate_summary(APPROVED, baseline, [r1])
     assert summary["exploitation_status"] == "confirmed"
     assert summary["phase"] == "summary"
-    assert summary["related_risk_ids"] == ["RISK-001"]
+    assert summary.get("related_risk_ids", []) == []
 
 
 # ── Issue 3: Attack scope enforcement ────────────────────────────────────────

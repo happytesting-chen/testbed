@@ -1,17 +1,75 @@
-# Agentic AI Threat Taxonomy — Default Threat Scope
+# Harmonised Weakness–Threat–Impact Taxonomy for Agentic AI Security
 #
-# Seven threat categories for AI agent security assessment.
-# Derived from OWASP Agentic AI guidance and internal research.
+# Three layers:
+#   Weaknesses (W1–W12) — standing conditions that enable threats
+#   Threats (20 categories)  — events that exploit weaknesses
+#   Impacts (I1–I6)  — harmful outcomes caused by threats
 #
-# This taxonomy is generic — it applies to any multi-agent AI system,
-# not only the Document Assistant testbed.
-#
-# Each category includes potential weakness patterns that the Threat
-# Modeling Skill should check for when assessing a target application.
+# This taxonomy is generic — it applies to any multi-agent AI system.
 
-threat_categories:
+# ═══════════════════════════════════════════════════════════════════════════════
+# WEAKNESSES — Standing Conditions (W1–W12)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+weaknesses:
+  - id: "W1"
+    name: "Improper Output Handling"
+    description: "Agent output is consumed without validation or sanitisation by downstream components."
+
+  - id: "W2"
+    name: "No resource bounds"
+    description: "No limits on compute, tokens, API calls, or storage consumed by agent operations."
+
+  - id: "W3"
+    name: "Insufficient Authentication & Authorisation"
+    description: "Missing or weak identity verification or permission checks for agent actions."
+
+  - id: "W4"
+    name: "Lack of Audit and Telemetry"
+    description: "Insufficient logging, monitoring, or tracing of agent decisions and actions."
+
+  - id: "W5"
+    name: "Weak Isolation"
+    description: "Insufficient boundaries between agents, tools, data stores, or execution environments."
+
+  - id: "W6"
+    name: "Poor Scanning"
+    description: "Inadequate inspection of inputs, outputs, or artifacts for malicious content."
+
+  - id: "W7"
+    name: "No Governance"
+    description: "Missing policies, approval workflows, or oversight mechanisms for agent behaviour."
+
+  - id: "W8"
+    name: "Excessive Agency"
+    description: "Agent has more capabilities, tools, or permissions than required for its task."
+
+  - id: "W9"
+    name: "No data / control plane separation"
+    description: "Data content and control instructions are not distinguished, allowing data to be interpreted as instructions."
+
+  - id: "W10"
+    name: "Over-privileged component"
+    description: "A component operates with broader permissions than its role requires."
+
+  - id: "W11"
+    name: "Vector and Embedding Weakness"
+    description: "Vulnerabilities in vector stores, embeddings, or retrieval mechanisms."
+
+  - id: "W12"
+    name: "Insufficient context scoping"
+    description: "Agent context includes information beyond what is needed, increasing attack surface."
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# THREATS — Events (20 categories)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+threats:
+  # ── In-scope for Document Assistant testbed (7) ───────────────────────────
+
   - id: "RP.1"
     name: "Prompt Injection"
+    in_testbed_scope: true
     description: >
       Untrusted content in any channel (user input, documents, tool outputs,
       agent responses) is interpreted as instruction by an LLM agent.
@@ -23,6 +81,7 @@ threat_categories:
 
   - id: "RP.2"
     name: "Agent Goal Hijack"
+    in_testbed_scope: true
     description: >
       An agent's objective or task plan is redirected by injected content,
       causing it to perform actions the user did not request.
@@ -33,6 +92,7 @@ threat_categories:
 
   - id: "KM.1"
     name: "Memory and Context Poisoning"
+    in_testbed_scope: true
     description: >
       Stored or retrievable context (conversation history, RAG results,
       shared memory) is corrupted by injected content that persists across
@@ -44,6 +104,7 @@ threat_categories:
 
   - id: "TA.1"
     name: "Tool Misuse and Exploitation"
+    in_testbed_scope: true
     description: >
       A legitimate tool is applied unsafely — wrong scope, missing validation,
       or insufficient authorization checks on tool arguments or results.
@@ -55,6 +116,7 @@ threat_categories:
 
   - id: "IA.1"
     name: "Identity and Privilege Abuse"
+    in_testbed_scope: true
     description: >
       Delegation, role inheritance, or cached credentials are manipulated,
       causing the system to act under the wrong identity or privilege level.
@@ -66,6 +128,7 @@ threat_categories:
 
   - id: "IA.2"
     name: "Privilege Escalation via Scope Creep"
+    in_testbed_scope: true
     description: >
       Permissions expand beyond what the task requires — through auto-approval,
       overbroad grants, or persistent elevated access.
@@ -76,6 +139,7 @@ threat_categories:
 
   - id: "XA.1"
     name: "Insecure Inter-Agent Communication"
+    in_testbed_scope: true
     description: >
       Messages or data passed between agents are not properly validated,
       sanitized, or authenticated, allowing injection, spoofing, or
@@ -85,3 +149,99 @@ threat_categories:
       - "Raw content relayed between agents without structured separation"
       - "Unvalidated resource references passed across agent boundaries"
       - "Excessive context or credentials shared with agents that don't need them"
+
+  # ── Reference only — not in Document Assistant testbed scope (13) ─────────
+
+  - id: "RP.3"
+    name: "Goal misgeneralisation"
+    in_testbed_scope: false
+    description: "Agent pursues a proxy objective that diverges from the intended goal."
+
+  - id: "RP.4"
+    name: "Behavioural drift"
+    in_testbed_scope: false
+    description: "Agent behaviour changes over time due to evolving context, memory, or fine-tuning."
+
+  - id: "KM.2"
+    name: "Data and Model Poisoning"
+    in_testbed_scope: false
+    description: "Training data, fine-tuning sets, or model weights are corrupted to alter agent behaviour."
+
+  - id: "TA.2"
+    name: "Tool Poisoning"
+    in_testbed_scope: false
+    description: "A tool's implementation, schema, or documentation is manipulated to cause misuse."
+
+  - id: "XA.2"
+    name: "Rogue Agents"
+    in_testbed_scope: false
+    description: "A compromised or malicious agent operates within a trusted multi-agent system."
+
+  - id: "SC.1"
+    name: "Malicious extension"
+    in_testbed_scope: false
+    description: "A plugin, extension, or integration introduces malicious functionality."
+
+  - id: "SC.2"
+    name: "Dependency tampering"
+    in_testbed_scope: false
+    description: "A software dependency is modified to introduce vulnerabilities or backdoors."
+
+  - id: "SC.3"
+    name: "Metadata & provenance forgery"
+    in_testbed_scope: false
+    description: "Source attribution, version history, or audit metadata is falsified."
+
+  - id: "SC.4"
+    name: "Update Drift"
+    in_testbed_scope: false
+    description: "Legitimate updates introduce unintended behavioural changes or regressions."
+
+  - id: "RT.1"
+    name: "Resource exhaustion"
+    in_testbed_scope: false
+    description: "Agent operations consume excessive compute, tokens, or API calls."
+
+  - id: "RT.2"
+    name: "Model extraction"
+    in_testbed_scope: false
+    description: "Systematic querying to reconstruct model weights, training data, or decision boundaries."
+
+  - id: "RT.3"
+    name: "Shadow deployment"
+    in_testbed_scope: false
+    description: "Unauthorised agent instances operate outside governance and monitoring."
+
+  - id: "HI.1"
+    name: "Human-Agent Trust Exploitation"
+    in_testbed_scope: false
+    description: "Agent exploits human trust, cognitive biases, or social dynamics to influence decisions."
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IMPACTS — Harmful Outcomes (I1–I6)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+impacts:
+  - id: "I1"
+    name: "Sensitive data disclosure"
+    description: "Confidential information is exposed to unauthorized parties."
+
+  - id: "I2"
+    name: "Hidden Context Exposure"
+    description: "System prompts, internal configurations, or hidden instructions are revealed."
+
+  - id: "I3"
+    name: "Misinformation"
+    description: "The system presents false, misleading, or unverified information as authoritative."
+
+  - id: "I4"
+    name: "Unexpected code execution"
+    description: "Arbitrary code or commands are executed without authorization."
+
+  - id: "I5"
+    name: "Cascading Failures"
+    description: "A failure in one component propagates through the system causing widespread impact."
+
+  - id: "I6"
+    name: "Availability & cost loss"
+    description: "Service disruption or excessive resource consumption causing operational or financial impact."

@@ -1,6 +1,6 @@
 ---
 name: mitigation
-description: "Mitigation Skill — Security Control Implementation and Residual Risk Assessment. Analyze red-team results, recommend and implement mitigations, verify effectiveness via retesting, assess residual risk, and update the existing TRA. Generic and reusable across AI applications."
+description: "Mitigation Skill — Analyze red-team results, recommend and implement security mitigations, verify effectiveness via retesting, and assess residual risk. Generic and reusable across AI applications."
 ---
 
 # Mitigation Skill
@@ -8,27 +8,26 @@ description: "Mitigation Skill — Security Control Implementation and Residual 
 ## Purpose
 
 After threat modeling (Phase A) and red-team testing (Phase B), this skill:
-1. Analyzes risks and red-team findings
+1. Analyzes red-team findings by scenario
 2. Recommends and implements security mitigations
 3. Verifies effectiveness through attack retesting
 4. Assesses residual risk
-5. Updates the existing TRA with Phase B and Phase C results
 
 ## Inputs
 
-### Input 1 — Existing TRA from Phase A
+### Input 1 — Test Scenarios from Phase A
 
-Load the TRA produced by the Threat Modeling Skill (`security_testing/tra/tra_<target>.yaml`).
+Load the approved scenarios produced by the Threat Modeling Skill from `security_testing/scenarios/`.
 
-Preserve the original preliminary assessment when updating.
+Each scenario defines the impact, threat, potential weaknesses, and success criteria.
 
 ### Input 2 — Red-Team Results from Phase B
 
 Read attack records and summaries from `security_testing/records/`.
 
-Key fields: scenario IDs, related risk IDs, verdicts, evidence, repeat-validation success rate, testing mode, limitations.
+Key fields: scenario IDs, verdicts, evidence, repeat-validation success rate, testing mode, limitations.
 
-Do not assume every applicable threat was exploited. Do not assume a failed attack proves a risk doesn't exist.
+Do not assume every applicable threat was exploited. Do not assume a failed attack proves a control is effective.
 
 ### Input 3 — Target Application Information
 
@@ -36,40 +35,32 @@ Use available architecture, source code, and configurations. Adapt to the availa
 - **White-box**: direct mitigation implementation possible
 - **Black-box**: recommendation-only or configuration-level changes
 
-### Input 4 — Risk Assessment Methodology
-
-Use the same methodology applied in Phase A. If provisional, retain it and label assessments accordingly.
-
 ## Workflow
 
-### Step C1 — Analyze Risks and Security Findings
+### Step C1 — Analyze Security Findings
 
-For each Risk ID in the TRA:
+For each tested scenario:
 
-1. Find related test scenarios and their results from Phase B
+1. Find related test records and summaries from Phase B
 2. Determine exploitation status: `confirmed`, `not_observed`, `inconclusive`, or `not_tested`
 3. Identify potential root causes and contributing weaknesses
 4. Identify existing controls and their observed effectiveness
 5. Determine whether further mitigation is required
 
-Use `scripts/risk_assessment.py` for structured analysis:
-```python
-from scripts.risk_assessment import analyze_risk, RiskAnalysis
-analysis = analyze_risk(risk_entry, test_results)
-```
+Use `scripts/risk_assessment.py` for structured analysis where applicable.
 
 ### Step C2 — Recommend Mitigations
 
-For each risk requiring treatment:
+For each confirmed or plausible finding:
 
-1. Identify appropriate controls from `references/mitigation_guidance.yaml`
+1. Identify appropriate controls
 2. Explain which root cause each control addresses
 3. Consider preventive, detective, and containment controls
 4. Prefer controls that enforce boundaries over LLM-instruction-only defenses
 5. Assess feasibility, effectiveness, and impact on legitimate functionality
 6. Identify remaining attack paths or limitations
 
-Produce a mitigation plan mapped to Risk IDs. Each recommendation includes:
+Each recommendation includes:
 - Control description and rationale
 - Expected risk reduction
 - Implementation requirements
@@ -99,20 +90,13 @@ If retesting is unavailable, mark the mitigation as not verified.
 
 ### Step C5 — Assess Residual Risk
 
-For each Risk ID, using `scripts/risk_assessment.py`:
-
-```python
-from scripts.risk_assessment import assess_residual_risk
-residual = assess_residual_risk(risk_entry, mitigations, retest_results)
-```
-
-Consider:
+For each finding, consider:
 - Whether mitigation was implemented and verified
 - Whether previously successful attacks were blocked
 - Whether alternative attack paths remain
 - Testing coverage and limitations
 
-Do not automatically reduce risk because a mitigation exists. Do not convert attack success rate directly into risk likelihood.
+Do not automatically reduce risk because a mitigation exists. Do not convert attack success rate directly into a risk reduction claim.
 
 Residual assessment statuses:
 - `pending_implementation`
@@ -124,47 +108,19 @@ Residual assessment statuses:
 - `assessed_transferred`
 - `not_applicable`
 
-### Step C6 — Update the Existing TRA
+### Step C6 — Document Results
 
-Add Phase B testing and Phase C mitigation fields to each Risk ID in the existing TRA. Do not create a separate risk register.
-
-Preserve all original fields. Add:
-
-```yaml
-testing:
-  scenario_ids: []
-  status: completed | not_tested
-  exploitation_status: confirmed | not_observed | inconclusive | not_tested
-  evidence_refs: []
-
-mitigation:
-  recommended_controls: []
-  implemented_controls: []
-  implementation_status: proposed | implemented | partial
-  retest_status: not_started | completed | not_available
-  retest_evidence: []
-
-residual_assessment:
-  status: pending_assessment
-  likelihood: null
-  impact: null
-  risk_rating: null
-  risk_level: null
-  rationale: null
-  limitations: []
-
-risk_disposition:
-  status: open | mitigated | accepted | transferred
-```
-
-Save the updated TRA to the same file, preserving the original structure.
+Produce a mitigation report per scenario or group of related scenarios. Include:
+- Exploitation status from Phase B
+- Recommended and implemented controls
+- Retest results
+- Residual assessment with rationale
+- Limitations
 
 ## Important Rules
 
-- Assess residual risk per Risk ID, not per threat category or payload
 - Do not modify application code without explicit approval
 - Do not overwrite Phase B records — create separate Phase C retest records
 - Do not reduce residual risk merely because a control was proposed
-- Use the same risk matrix as the preliminary assessment
 - Mark insufficient-evidence assessments as provisional
 - Keep the skill generic — no application-specific assumptions in SKILL.md

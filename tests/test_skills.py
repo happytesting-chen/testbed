@@ -4,86 +4,60 @@ import yaml
 from pathlib import Path
 
 SCENARIOS_DIR = Path(__file__).parent.parent / "security_testing" / "scenarios"
-TRA_DIR = Path(__file__).parent.parent / "security_testing" / "tra"
+TAXONOMY_PATH = (Path(__file__).parent.parent / ".claude" / "skills" / "threat-model"
+                 / "references" / "agentic_ai_threat_taxonomy.yaml")
 
 
-# ── TRA tests ─────────────────────────────────────────────────────────────────
+# ── Taxonomy tests ───────────────────────────────────────────────────────────
 
-def test_tra_yaml_valid():
-    path = TRA_DIR / "tra_document_assistant.yaml"
-    assert path.exists()
-    tra = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert "threat_applicability" in tra
-    assert "risk_register" in tra
-    assert len(tra["threat_applicability"]) == 7
-    assert len(tra["risk_register"]) >= 1
+def test_taxonomy_has_12_weaknesses():
+    data = yaml.safe_load(TAXONOMY_PATH.read_text(encoding="utf-8"))
+    assert len(data["weaknesses"]) == 12
+    ids = {w["id"] for w in data["weaknesses"]}
+    assert ids == {f"W{i}" for i in range(1, 13)}
 
+def test_taxonomy_has_20_threats():
+    data = yaml.safe_load(TAXONOMY_PATH.read_text(encoding="utf-8"))
+    assert len(data["threats"]) == 20
 
-def test_tra_covers_all_seven_threats():
-    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
-    threat_ids = {t["threat_id"] for t in tra["threat_applicability"]}
-    assert threat_ids == {"RP.1", "RP.2", "KM.1", "TA.1", "IA.1", "IA.2", "XA.1"}
+def test_taxonomy_has_6_impacts():
+    data = yaml.safe_load(TAXONOMY_PATH.read_text(encoding="utf-8"))
+    assert len(data["impacts"]) == 6
+    ids = {i["id"] for i in data["impacts"]}
+    assert ids == {f"I{i}" for i in range(1, 7)}
 
+def test_taxonomy_testbed_scope_has_7_threats():
+    data = yaml.safe_load(TAXONOMY_PATH.read_text(encoding="utf-8"))
+    in_scope = [t for t in data["threats"] if t.get("in_testbed_scope")]
+    assert len(in_scope) == 7
+    scope_ids = {t["id"] for t in in_scope}
+    assert scope_ids == {"RP.1", "RP.2", "KM.1", "TA.1", "IA.1", "IA.2", "XA.1"}
 
-def test_tra_threat_status_valid():
-    """Each threat must have a valid status — but not all must be Applicable."""
-    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
-    valid_statuses = {"Applicable", "Not Applicable", "Needs Verification"}
-    for t in tra["threat_applicability"]:
-        assert t["status"] in valid_statuses, \
-            f"{t['threat_id']} has invalid status '{t['status']}'"
-        assert "rationale" in t, f"{t['threat_id']} must have a rationale"
+def test_taxonomy_out_of_scope_threats_present():
+    """Out-of-scope threats exist as reference but are not in testbed scope."""
+    data = yaml.safe_load(TAXONOMY_PATH.read_text(encoding="utf-8"))
+    out_of_scope = [t for t in data["threats"] if not t.get("in_testbed_scope")]
+    assert len(out_of_scope) == 13
+    assert any(t["id"] == "HI.1" for t in out_of_scope)
 
-
-def test_tra_risk_register_has_required_fields():
-    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
-    required = {"risk_id", "threat_category", "risk_scenario", "impact",
-                "security_concerns", "proposed_controls", "preliminary_likelihood",
-                "risk_rating", "risk_level"}
-    for risk in tra["risk_register"]:
-        missing = required - set(risk.keys())
-        assert not missing, f"{risk['risk_id']} missing: {missing}"
-
-
-def test_tra_risk_ids_unique():
-    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
-    ids = [r["risk_id"] for r in tra["risk_register"]]
-    assert len(ids) == len(set(ids)), "Duplicate risk IDs found"
-
-
-def test_tra_risk_rating_format():
-    """Risk rating should be 'Likelihood × Impact' format."""
-    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
-    for risk in tra["risk_register"]:
-        rating = risk["risk_rating"]
-        assert "×" in rating, f"{risk['risk_id']}: risk_rating should use 'Likelihood × Impact' format, got '{rating}'"
-
-
-def test_tra_risk_005_006_split():
-    """RISK-005 and RISK-006 should be split into distinct risks."""
-    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
-    ids = {r["risk_id"] for r in tra["risk_register"]}
-    assert "RISK-005a" in ids, "RISK-005 should be split (scope validation)"
-    assert "RISK-005b" in ids, "RISK-005 should be split (input validation)"
-    assert "RISK-005c" in ids, "RISK-005 should be split (data exposure)"
-    assert "RISK-006a" in ids, "RISK-006 should be split (credential leakage)"
-    assert "RISK-006b" in ids, "RISK-006 should be split (role bypass)"
-    assert "RISK-005" not in ids, "RISK-005 should not exist as a combined entry"
-    assert "RISK-006" not in ids, "RISK-006 should not exist as a combined entry"
+def test_taxonomy_in_scope_threats_have_weaknesses():
+    data = yaml.safe_load(TAXONOMY_PATH.read_text(encoding="utf-8"))
+    for t in data["threats"]:
+        if t.get("in_testbed_scope"):
+            assert "potential_weaknesses" in t, f"{t['id']} missing potential_weaknesses"
+            assert len(t["potential_weaknesses"]) >= 1
 
 
 # ── Scenario tests ────────────────────────────────────────────────────────────
 
 def test_scenario_yaml_valid():
+    """Existing S1-RP1-001 remains loadable (backward compatibility)."""
     path = SCENARIOS_DIR / "S1-RP1-001.yaml"
     assert path.exists()
     s = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert s["id"] == "S1-RP1-001"
     assert s["status"] in ("draft", "approved")
-    assert s["type"] in ("individual", "attack_chain")
-    assert s["threat_category"] == "RP.1"
     assert "objective" in s
-    assert "legitimate_task" in s
     assert "attack_path" in s
     assert "success_criteria" in s
     assert "observable_outcome" in s["success_criteria"]
@@ -122,16 +96,6 @@ def test_scenario_evaluator_section_exists():
     assert "potentially_required" in ev["weakness_mapping"]
     assert "evidence_requirements" in ev
     assert "configurations" in ev
-
-
-def test_scenario_references_tra_risks():
-    s = yaml.safe_load((SCENARIOS_DIR / "S1-RP1-001.yaml").read_text())
-    assert "related_risk_ids" in s
-    assert len(s["related_risk_ids"]) >= 1
-    tra = yaml.safe_load((TRA_DIR / "tra_document_assistant.yaml").read_text())
-    tra_ids = {r["risk_id"] for r in tra["risk_register"]}
-    for rid in s["related_risk_ids"]:
-        assert rid in tra_ids, f"Scenario references {rid} but it's not in the TRA"
 
 
 def test_scenario_has_no_evaluator_secrets():
@@ -396,14 +360,6 @@ def test_scenario_loader_attacker_view_has_no_flag_ids():
     assert "shadow_violation" not in text
 
 
-def test_tra_matrix_marked_provisional():
-    """The TRA must clearly label its risk matrix as provisional."""
-    text = (TRA_DIR / "tra_document_assistant.yaml").read_text(encoding="utf-8")
-    assert "PROVISIONAL" in text
-    assert "approved organizational risk methodology" in text.lower() or \
-           "approved methodology" in text.lower()
-
-
 def test_red_team_runner_importable():
     from security_testing.red_team import RedTeamRunner
     assert RedTeamRunner is not None
@@ -462,12 +418,9 @@ def test_threat_model_has_bundled_taxonomy():
     tax = root / ".claude/skills/threat-model/references/agentic_ai_threat_taxonomy.yaml"
     assert tax.exists()
     data = yaml.safe_load(tax.read_text(encoding="utf-8"))
-    assert "threat_categories" in data
-    ids = {t["id"] for t in data["threat_categories"]}
-    assert ids == {"RP.1", "RP.2", "KM.1", "TA.1", "IA.1", "IA.2", "XA.1"}
-    for t in data["threat_categories"]:
-        assert "potential_weaknesses" in t
-        assert len(t["potential_weaknesses"]) >= 1
+    assert "weaknesses" in data
+    assert "threats" in data
+    assert "impacts" in data
 
 
 def test_threat_model_has_reference_file():

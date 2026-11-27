@@ -200,7 +200,6 @@ All outputs saved as JSON in `security_testing/records/`.
 ```json
 {
   "scenario_id": "...",
-  "related_risk_ids": ["RISK-001"],
   "objective": "...",
   "testing_mode": "black_box",
   "baseline": {"response_preview": "...", "state_snapshot": {}},
