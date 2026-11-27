@@ -548,7 +548,9 @@ def test_summary_has_exploitation_status(tmp_path):
     summary = runner.generate_summary(APPROVED, baseline, [r1])
     assert summary["exploitation_status"] == "confirmed"
     assert summary["phase"] == "summary"
-    assert summary.get("related_risk_ids", []) == []
+    assert "related_risk_ids" not in summary
+    assert "impact" in summary
+    assert "threat" in summary
 
 
 # ── Issue 3: Attack scope enforcement ────────────────────────────────────────

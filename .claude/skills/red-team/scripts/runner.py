@@ -458,7 +458,8 @@ class RedTeamRunner:
         summary = {
             "scenario_id": sid, "phase": "summary",
             "execution_id": self._run_id,
-            "related_risk_ids": scenario.get("related_risk_ids", []),
+            "impact": scenario.get("impact"),
+            "threat": scenario.get("threat") or scenario.get("threat_category"),
             "objective": scenario.get("objective", ""),
             "access_mode": self.policy.mode,
             "exploitation_status": exploitation_status,

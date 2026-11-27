@@ -105,6 +105,95 @@ def test_scenario_has_no_evaluator_secrets():
     assert "_ground_truth" not in text
 
 
+# ── New impact-first scenario tests ──────────────────────────────────────────
+
+def test_new_scenario_impact_first_format():
+    """S2-I3-001 follows the impact-first scenario template."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert s["id"] == "S2-I3-001"
+    assert s["status"] == "draft"
+    assert s["impact"] == "I3"
+    assert s["impact_description"] == "Misinformation"
+    assert s["threat"] == "RP.1"
+    assert "trigger" in s
+    assert "potential_weakness" in s
+    assert s["potential_weakness"]["generic"] == "W9"
+    assert "objective" in s
+    assert "success_criteria" in s
+
+def test_new_scenario_has_no_risk_ids():
+    """New scenarios must not contain TRA risk IDs."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert "related_risk_ids" not in s
+    assert "risk_rating" not in s
+    assert "risk_level" not in s
+    assert "likelihood" not in s
+
+def test_new_scenario_has_no_payload():
+    """Technique-independent scenarios must not contain attack payloads."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert "payload" not in s
+
+def test_new_scenario_planted_weakness_in_evaluator_only():
+    """Application-specific weakness IDs must be in _evaluator, not attacker-visible."""
+    full = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert "_evaluator" in full
+    # Application-specific weakness is in evaluator section
+    ev_text = json.dumps(full["_evaluator"])
+    assert "RP1-03" in ev_text
+
+    # Attacker-visible section has no planted weakness IDs
+    from security_testing.scenario_loader import load_scenario_attacker_view
+    att = load_scenario_attacker_view(SCENARIOS_DIR / "S2-I3-001.yaml")
+    att_text = json.dumps(att)
+    for wid in ["RP1-01", "RP1-02", "RP1-03", "RP1-04", "RP2-03", "XA1-02", "IA2-01"]:
+        assert wid not in att_text, f"Planted weakness {wid} leaked to attacker view"
+
+def test_new_scenario_generic_weakness_visible():
+    """Generic weakness category (W1-W12) is visible in attacker summary."""
+    from security_testing.scenario_loader import load_scenario_attacker_view
+    att = load_scenario_attacker_view(SCENARIOS_DIR / "S2-I3-001.yaml")
+    assert att["potential_weakness"]["generic"] == "W9"
+    assert "application_specific" not in att["potential_weakness"]
+
+def test_new_scenario_permitted_actions():
+    """New scenario has explicit permitted_actions."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert "permitted_actions" in s["attacker"]
+    assert "upload_document" in s["attacker"]["permitted_actions"]
+    assert "send_chat_message" in s["attacker"]["permitted_actions"]
+
+def test_old_scenario_still_loadable():
+    """S1-RP1-001 (old format) remains loadable and backward compatible."""
+    from security_testing.scenario_loader import load_scenario_attacker_view
+    s = load_scenario_attacker_view(SCENARIOS_DIR / "S1-RP1-001.yaml")
+    assert s["id"] == "S1-RP1-001"
+    assert "_evaluator" not in s
+    assert "threat_category" in s or "threat" in s
+
+def test_runner_summary_no_risk_ids(tmp_path):
+    """Runner summary uses impact/threat, not related_risk_ids."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent / ".claude/skills/red-team/scripts"))
+    from runner import RedTeamRunner
+
+    class MT:
+        def chat(self, m, run_tag=None): return {"run_id": "r1", "response": "ok"}
+        def upload(self, f, c): return {"id": "u1"}
+        def snapshot_state(self): return {}
+
+    scenario = {"id": "T1", "status": "approved", "objective": "t",
+                "impact": "I3", "threat": "RP.1",
+                "attacker": {"role": "a", "permitted_actions": ["send_chat_message"]},
+                "success_criteria": {}}
+    runner = RedTeamRunner(target=MT(), records_dir=str(tmp_path / "r"))
+    baseline = runner.run_baseline(scenario)
+    summary = runner.generate_summary(scenario, baseline, [])
+    assert summary["impact"] == "I3"
+    assert summary["threat"] == "RP.1"
+    assert "related_risk_ids" not in summary
+
+
 def test_red_team_runner_generic_interface(tmp_path):
     """Runner accepts a generic target adapter, not hardcoded URLs."""
     from security_testing.red_team import RedTeamRunner
