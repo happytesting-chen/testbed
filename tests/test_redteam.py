@@ -470,10 +470,8 @@ class TestS5a_ScopeAutoApprove:
 class TestResultsSummary:
     """Verify the implemented weaknesses count matches expectations."""
 
-    def test_nine_weaknesses_implemented(self):
+    def test_all_weaknesses_implemented(self):
         from app.weakness_registry import WEAKNESSES
         impl = [w for w in WEAKNESSES if w["status"] == "implemented"]
-        assert len(impl) == 9
-        assert {w["id"] for w in impl} == {
-            "RP1-01", "RP1-02", "RP1-03", "RP1-04",
-            "RP2-03", "KM1-01", "KM1-03", "XA1-02", "IA2-01"}
+        assert len(impl) == 19
+        assert len(WEAKNESSES) == 19

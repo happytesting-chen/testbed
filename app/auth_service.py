@@ -53,14 +53,29 @@ def deny_scope_request(db: Database, request_id: str) -> dict:
 def _create_grant(db: Database, request: dict, actor: str, finding_id: str,
                   approved_by: str, session_id: str) -> dict:
     grant_id = str(uuid.uuid4())
+
+    if flags.is_on("IA2-02"):
+        # INTENTIONAL VULNERABILITY IA2-02: grant covers ALL findings
+        grant_finding_id = None
+    else:
+        # Secure: scoped to the specific finding
+        grant_finding_id = finding_id
+
+    if flags.is_on("IA2-03"):
+        # INTENTIONAL VULNERABILITY IA2-03: no expiry, no session binding
+        grant_session_id = None
+    else:
+        # Secure: bound to originating session (db.create_scope_grant sets TTL)
+        grant_session_id = session_id
+
     grant = db.create_scope_grant(
         grant_id=grant_id,
         request_id=request["id"],
         actor=actor,
-        finding_id=finding_id,
+        finding_id=grant_finding_id,
         scope="findings:write",
         approved_by=approved_by,
-        session_id=session_id,
+        session_id=grant_session_id,
     )
     return grant
 

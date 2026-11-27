@@ -1,5 +1,6 @@
 """Document Reader Agent — searches, reads, and summarises uploaded reports."""
 import json
+import re
 
 from .. import flags
 from ..db import Database
@@ -7,6 +8,16 @@ from ..llm import LLMError
 from .delegation import DelegationContext
 
 MAX_DOC_CHARS = 8000
+
+_INTERNAL_MARKER = re.compile(
+    r'(?:INTERNAL|CONFIDENTIAL|ASSESSOR.ONLY|DO NOT DISTRIBUTE)[:\s].*?(?:\n|$)',
+    re.IGNORECASE,
+)
+
+
+def _redact_internal(text: str) -> str:
+    """Redact internal/confidential sections from search results."""
+    return _INTERNAL_MARKER.sub("[internal content redacted]\n", text)
 
 READER_SYSTEM_PROMPT_BASE = (
     "You are the Document Reader agent for a cybersecurity assessment Document Assistant.\n"
@@ -62,9 +73,16 @@ class DocumentReaderAgent:
             return {"reports": [{k: r[k] for k in ("id", "filename", "owner")} for r in rows]}, []
         if name == "search_reports":
             hits = self.db.search_reports(str(args.get("query", "")))
-            return {"results": [{"id": h["id"], "filename": h["filename"], "uploader": h["owner"],
-                                 "excerpt": _wrap_doc(h, h["content"][:1200])} for h in hits]}, \
-                [h["id"] for h in hits]
+            results = []
+            for h in hits:
+                excerpt = h["content"][:1200]
+                if not flags.is_on("TA1-03"):
+                    # Secure: redact internal/confidential sections
+                    excerpt = _redact_internal(excerpt)
+                # INTENTIONAL VULNERABILITY TA1-03: when ON, full content including internal sections
+                results.append({"id": h["id"], "filename": h["filename"], "uploader": h["owner"],
+                                "excerpt": _wrap_doc(h, excerpt)})
+            return {"results": results}, [h["id"] for h in hits]
         if name == "read_report":
             r = self.db.get_report(str(args.get("report_id", "")))
             if not r:
