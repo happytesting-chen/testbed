@@ -363,9 +363,8 @@ def run_live_test():
         },
         "scenario": {
             "id": scenario["id"],
-            "threat_category": scenario.get("threat_category"),
-            "impact": scenario.get("impact"),
-            "threat": scenario.get("threat") or scenario.get("threat_category"),
+            "impact": summary.get("impact"),
+            "threat": summary.get("threat"),
             "objective": scenario.get("objective", "").strip(),
             "status": scenario["status"],
         },

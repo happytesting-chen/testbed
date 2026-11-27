@@ -16,8 +16,8 @@ Execute approved technique-independent test scenarios against a target AI applic
 A YAML file produced by the Threat Modeling Skill (or supplied independently) with `status: approved`.
 
 The scenario provides the fixed testing contract:
-- Scenario ID, impact category, threat category
-- Attack objective and legitimate user task
+- Scenario ID, impact (ID + name), threat (ID + name)
+- Attack objective and legitimate task
 - Attacker role and permitted actions (`upload_document`, `send_chat_message`)
 - Human-readable capability descriptions
 - Entry point and controlled surface

@@ -105,21 +105,21 @@ def test_scenario_has_no_evaluator_secrets():
     assert "_ground_truth" not in text
 
 
-# ── New impact-first scenario tests ──────────────────────────────────────────
+# ── Impact-first scenario tests ──────────────────────────────────────────────
 
-def test_new_scenario_impact_first_format():
-    """S2-I3-001 follows the impact-first scenario template."""
+def test_new_scenario_uses_legitimate_task():
+    """S2-I3-001 uses legitimate_task, not trigger."""
     s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
-    assert s["id"] == "S2-I3-001"
-    assert s["status"] == "draft"
-    assert s["impact"] == "I3"
-    assert s["impact_description"] == "Misinformation"
-    assert s["threat"] == "RP.1"
-    assert "trigger" in s
-    assert "potential_weakness" in s
-    assert s["potential_weakness"]["generic"] == "W9"
-    assert "objective" in s
-    assert "success_criteria" in s
+    assert "legitimate_task" in s
+    assert "trigger" not in s
+
+def test_new_scenario_impact_and_threat_structured():
+    """Impact and threat fields include both ID and name."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert s["impact"]["id"] == "I3"
+    assert s["impact"]["name"] == "Misinformation"
+    assert s["threat"]["id"] == "RP.1"
+    assert s["threat"]["name"] == "Prompt Injection"
 
 def test_new_scenario_has_no_risk_ids():
     """New scenarios must not contain TRA risk IDs."""
@@ -130,68 +130,126 @@ def test_new_scenario_has_no_risk_ids():
     assert "likelihood" not in s
 
 def test_new_scenario_has_no_payload():
-    """Technique-independent scenarios must not contain attack payloads."""
     s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
     assert "payload" not in s
 
-def test_new_scenario_planted_weakness_in_evaluator_only():
-    """Application-specific weakness IDs must be in _evaluator, not attacker-visible."""
+def test_new_scenario_weakness_in_evaluator_only():
+    """All weakness hypotheses are in _evaluator, not attacker-visible."""
     full = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert "potential_weakness" not in full  # not at top level
     assert "_evaluator" in full
-    # Application-specific weakness is in evaluator section
-    ev_text = json.dumps(full["_evaluator"])
-    assert "RP1-03" in ev_text
+    wm = full["_evaluator"]["weakness_mapping"]
+    assert any(w["id"] == "W9" for w in wm["generic"])
+    assert any(w["id"] == "RP1-03" for w in wm["application_specific"])
 
-    # Attacker-visible section has no planted weakness IDs
     from security_testing.scenario_loader import load_scenario_attacker_view
     att = load_scenario_attacker_view(SCENARIOS_DIR / "S2-I3-001.yaml")
     att_text = json.dumps(att)
-    for wid in ["RP1-01", "RP1-02", "RP1-03", "RP1-04", "RP2-03", "XA1-02", "IA2-01"]:
-        assert wid not in att_text, f"Planted weakness {wid} leaked to attacker view"
+    for wid in ["RP1-01", "RP1-02", "RP1-03", "RP1-04", "RP2-03", "XA1-02", "IA2-01", "W9"]:
+        assert wid not in att_text, f"Weakness {wid} leaked to black-box attacker view"
 
-def test_new_scenario_generic_weakness_visible():
-    """Generic weakness category (W1-W12) is visible in attacker summary."""
+def test_new_scenario_success_check_in_evaluator():
+    """Structured verification spec is in _evaluator, not attacker-visible."""
+    full = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    check = full["_evaluator"]["success_check"]
+    assert check["type"] == "misinformation"
+    assert check["target_finding"] == "F-001"
+    assert check["require_database_unchanged"] is True
+
     from security_testing.scenario_loader import load_scenario_attacker_view
     att = load_scenario_attacker_view(SCENARIOS_DIR / "S2-I3-001.yaml")
-    assert att["potential_weakness"]["generic"] == "W9"
-    assert "application_specific" not in att["potential_weakness"]
+    assert "success_check" not in json.dumps(att)
 
 def test_new_scenario_permitted_actions():
-    """New scenario has explicit permitted_actions."""
     s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
-    assert "permitted_actions" in s["attacker"]
     assert "upload_document" in s["attacker"]["permitted_actions"]
     assert "send_chat_message" in s["attacker"]["permitted_actions"]
 
+def test_new_scenario_is_draft():
+    s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    assert s["status"] == "draft"
+
+def test_taxonomy_id_name_match():
+    """Impact and threat IDs in S2-I3-001 must match the taxonomy."""
+    s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
+    tax = yaml.safe_load(TAXONOMY_PATH.read_text(encoding="utf-8"))
+    impacts = {i["id"]: i["name"] for i in tax["impacts"]}
+    threats = {t["id"]: t["name"] for t in tax["threats"]}
+    assert impacts[s["impact"]["id"]] == s["impact"]["name"]
+    assert threats[s["threat"]["id"]] == s["threat"]["name"]
+
 def test_old_scenario_still_loadable():
-    """S1-RP1-001 (old format) remains loadable and backward compatible."""
+    """S1-RP1-001 (old format) remains loadable."""
     from security_testing.scenario_loader import load_scenario_attacker_view
     s = load_scenario_attacker_view(SCENARIOS_DIR / "S1-RP1-001.yaml")
     assert s["id"] == "S1-RP1-001"
     assert "_evaluator" not in s
-    assert "threat_category" in s or "threat" in s
 
-def test_runner_summary_no_risk_ids(tmp_path):
-    """Runner summary uses impact/threat, not related_risk_ids."""
+def test_old_string_impact_threat_in_summary(tmp_path):
+    """Runner handles string impact/threat from old scenarios."""
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent / ".claude/skills/red-team/scripts"))
     from runner import RedTeamRunner
-
     class MT:
         def chat(self, m, run_tag=None): return {"run_id": "r1", "response": "ok"}
         def upload(self, f, c): return {"id": "u1"}
         def snapshot_state(self): return {}
-
     scenario = {"id": "T1", "status": "approved", "objective": "t",
                 "impact": "I3", "threat": "RP.1",
                 "attacker": {"role": "a", "permitted_actions": ["send_chat_message"]},
                 "success_criteria": {}}
     runner = RedTeamRunner(target=MT(), records_dir=str(tmp_path / "r"))
-    baseline = runner.run_baseline(scenario)
-    summary = runner.generate_summary(scenario, baseline, [])
+    summary = runner.generate_summary(scenario, runner.run_baseline(scenario), [])
     assert summary["impact"] == "I3"
     assert summary["threat"] == "RP.1"
+    assert summary["impact_name"] is None
+
+def test_dict_impact_threat_in_summary(tmp_path):
+    """Runner handles dict impact/threat from new scenarios."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent / ".claude/skills/red-team/scripts"))
+    from runner import RedTeamRunner
+    class MT:
+        def chat(self, m, run_tag=None): return {"run_id": "r1", "response": "ok"}
+        def upload(self, f, c): return {"id": "u1"}
+        def snapshot_state(self): return {}
+    scenario = {"id": "T1", "status": "approved", "objective": "t",
+                "impact": {"id": "I3", "name": "Misinformation"},
+                "threat": {"id": "RP.1", "name": "Prompt Injection"},
+                "attacker": {"role": "a", "permitted_actions": ["send_chat_message"]},
+                "success_criteria": {}}
+    runner = RedTeamRunner(target=MT(), records_dir=str(tmp_path / "r"))
+    summary = runner.generate_summary(scenario, runner.run_baseline(scenario), [])
+    assert summary["impact"] == "I3"
+    assert summary["impact_name"] == "Misinformation"
+    assert summary["threat"] == "RP.1"
+    assert summary["threat_name"] == "Prompt Injection"
     assert "related_risk_ids" not in summary
+
+def test_black_box_strips_potential_weakness():
+    """Black-box mode strips potential_weakness from scenario."""
+    from security_testing.scenario_loader import load_scenario_attacker_view
+    from access_policy import AccessPolicy
+    scenario = {"id": "T1", "status": "approved", "objective": "t",
+                "potential_weakness": {"generic": "W9"},
+                "attacker": {}, "success_criteria": {},
+                "_evaluator": {"secret": True}}
+    policy = AccessPolicy("black_box")
+    filtered = policy.filter_scenario(scenario)
+    assert "potential_weakness" not in filtered
+    assert "_evaluator" not in filtered
+
+def test_grey_box_keeps_potential_weakness():
+    """Grey/white-box modes keep potential_weakness visible."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent / ".claude/skills/red-team/scripts"))
+    from access_policy import AccessPolicy
+    scenario = {"id": "T1", "potential_weakness": {"generic": "W9"},
+                "_evaluator": {"secret": True}}
+    for mode in ("grey_box", "white_box"):
+        filtered = AccessPolicy(mode).filter_scenario(scenario)
+        assert "potential_weakness" in filtered
+        assert "_evaluator" not in filtered
 
 
 def test_red_team_runner_generic_interface(tmp_path):

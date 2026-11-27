@@ -24,7 +24,10 @@ class AccessPolicy:
         return self.mode == "white_box"
 
     def filter_scenario(self, scenario: dict) -> dict:
-        return {k: v for k, v in scenario.items() if not k.startswith("_")}
+        stripped = {k: v for k, v in scenario.items() if not k.startswith("_")}
+        if self.mode == "black_box":
+            stripped.pop("potential_weakness", None)
+        return stripped
 
     def filter_trace(self, trace: dict) -> dict:
         if self.mode == "black_box":

@@ -455,11 +455,15 @@ class RedTeamRunner:
                                "not_observed" if all_fail else
                                "inconclusive" if attempts else "not_tested")
 
+        raw_impact = scenario.get("impact")
+        raw_threat = scenario.get("threat") or scenario.get("threat_category")
         summary = {
             "scenario_id": sid, "phase": "summary",
             "execution_id": self._run_id,
-            "impact": scenario.get("impact"),
-            "threat": scenario.get("threat") or scenario.get("threat_category"),
+            "impact": raw_impact.get("id") if isinstance(raw_impact, dict) else raw_impact,
+            "impact_name": raw_impact.get("name") if isinstance(raw_impact, dict) else None,
+            "threat": raw_threat.get("id") if isinstance(raw_threat, dict) else raw_threat,
+            "threat_name": raw_threat.get("name") if isinstance(raw_threat, dict) else None,
             "objective": scenario.get("objective", ""),
             "access_mode": self.policy.mode,
             "exploitation_status": exploitation_status,
