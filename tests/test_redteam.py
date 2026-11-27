@@ -135,7 +135,7 @@ class TestS1_DocumentInjection:
     def test_full_chain_vulnerable(self, make_clients, seeded_report_and_finding):
         """All F1 flags ON: injection succeeds, finding modified in DB."""
         flags.set_flags(["RP1-01", "RP1-03", "RP1-04", "RP2-03",
-                         "XA1-02", "IA2-01"])
+                         "XA1-02", "IA2-01", "TA1-01"])
         _, f = seeded_report_and_finding
         fid = f["id"]
 

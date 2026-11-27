@@ -203,7 +203,7 @@ class CoordinatorAgent:
             log_fn("delegation", {"from_agent": "coordinator", "to_agent": "reader",
                                   "task": task, "context": context, "actor_role_sent": actor_role})
             result = self.reader.handle(delegation, cfg, run_id, log_fn)
-            return {"reader_response": result}, []
+            return {"reader_response": result}, self.reader.last_retrieved_ids
 
         if name == "delegate_to_findings_manager":
             task = str(args.get("task", ""))
@@ -213,8 +213,9 @@ class CoordinatorAgent:
                 fm_context = context
                 fm_structured = None
             else:
+                # Secure: extract structured params and suppress raw narrative
                 fm_structured = _extract_structured_params(context, self.db)
-                fm_context = context
+                fm_context = ""
             delegation = DelegationContext(
                 msg_id=str(uuid.uuid4()),
                 from_agent="coordinator", to_agent="findings_manager",
@@ -226,9 +227,11 @@ class CoordinatorAgent:
                                   "task": task, "context": fm_context,
                                   "structured_params": fm_structured,
                                   "actor_role_sent": actor_role})
+            retrieved_report_ids = self._last_retrieved_report_ids if hasattr(self, '_last_retrieved_report_ids') else None
             result = self.findings_manager.handle(
                 delegation, cfg, run_id, log_fn,
-                verified_role=actor_role)
+                verified_role=actor_role,
+                task_report_ids=retrieved_report_ids)
             return {"findings_manager_response": result}, []
 
         if name == "request_scope":
@@ -271,6 +274,7 @@ class CoordinatorAgent:
                 payload = {**payload, "agent": "coordinator"}
             self.db.add_event(run_id, seq, stage, payload)
 
+        self._last_retrieved_report_ids = []
         log("user_input", {"message": message, "session_id": session_id,
                            "history_turns": len(history) // 2})
         messages = [{"role": "system", "content": build_system_prompt(cfg)}, *history,
@@ -296,6 +300,8 @@ class CoordinatorAgent:
                     log("tool_call", {"step": step, "id": t.id, "name": t.name, "arguments": t.arguments})
                     result, retrieved = self._execute(cfg, t.name, t.arguments, actor, actor_role,
                                                      session_id, run_id, log)
+                    if retrieved:
+                        self._last_retrieved_report_ids.extend(retrieved)
                     log("tool_result", {"step": step, "id": t.id, "name": t.name,
                                         "retrieved_report_ids": retrieved, "result": result})
                     messages.append({"role": "tool", "tool_call_id": t.id,

@@ -66,6 +66,7 @@ class DocumentReaderAgent:
         self.db = db
         self.provider = provider
         self.max_steps = max_steps
+        self.last_retrieved_ids = []
 
     def _execute(self, cfg: dict, name: str, args: dict) -> tuple[dict, list[str]]:
         if name == "list_reports":
@@ -87,12 +88,16 @@ class DocumentReaderAgent:
             r = self.db.get_report(str(args.get("report_id", "")))
             if not r:
                 return {"error": "Report not found"}, []
+            text = r["content"][:MAX_DOC_CHARS]
+            if not flags.is_on("TA1-03"):
+                text = _redact_internal(text)
             return {"id": r["id"], "filename": r["filename"], "uploader": r["owner"],
-                    "content": _wrap_doc(r, r["content"][:MAX_DOC_CHARS])}, [r["id"]]
+                    "content": _wrap_doc(r, text)}, [r["id"]]
         return {"error": f"Unknown tool: {name}"}, []
 
     def handle(self, delegation: DelegationContext, cfg: dict,
                run_id: str, log_fn) -> str:
+        self.last_retrieved_ids = []
         system_prompt = READER_SYSTEM_PROMPT_BASE
         if not flags.is_on("RP1-03"):
             system_prompt += READER_UNTRUSTED_BLOCK
@@ -120,6 +125,7 @@ class DocumentReaderAgent:
                 log_fn("tool_call", {"agent": "reader", "step": step,
                                      "id": t.id, "name": t.name, "arguments": t.arguments})
                 result, retrieved = self._execute(cfg, t.name, t.arguments)
+                self.last_retrieved_ids.extend(retrieved)
                 log_fn("tool_result", {"agent": "reader", "step": step, "id": t.id, "name": t.name,
                                        "retrieved_report_ids": retrieved, "result": result})
                 messages.append({"role": "tool", "tool_call_id": t.id,
