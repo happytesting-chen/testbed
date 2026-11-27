@@ -99,7 +99,7 @@ def test_weakness_registry_endpoint(make_clients):
     r = ev.get("/api/weakness-registry", headers=EVAL)
     assert r.status_code == 200
     reg = r.json()
-    assert len(reg) == 24
+    assert len(reg) == 19
     implemented = [w for w in reg if w["status"] == "implemented"]
     assert len(implemented) == 7
     ids = {w["id"] for w in implemented}
