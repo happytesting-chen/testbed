@@ -138,7 +138,7 @@ Each scenario has two sections:
 | `attacker.role` | Identity under which the attack is executed |
 | `attacker.permitted_actions` | Explicit action identifiers (`upload_document`, `send_chat_message`) |
 | `attacker.capabilities` | Human-readable capability descriptions |
-| `attacker.entry_point` | Attacker-controlled entry point |
+| `attacker.entry_point` | Attacker-controlled entry point, including channel ID and readable channel name |
 | `legitimate_task` | Authorized user request that causes the application to process the attack surface |
 | `preconditions` | Conditions that must be true before the attack |
 | `attack_path` | Abstract description with components and trust boundaries |
@@ -177,6 +177,7 @@ attacker:
     - "Human-readable capability description"
   entry_point:
     channel: "<entry channel identifier>"
+    channel_name: "<full channel name from documented taxonomy>"
     method: "<API method or interaction>"
     controlled_surface: "What content the attacker controls"
 
@@ -204,6 +205,7 @@ _evaluator:
   weakness_classification:
     mandatory:
       - id: "<app-specific weakness ID>"
+        name: "<exact weakness title from registry>"
         reason: "Why the attack path breaks without this weakness"
     supporting:
       - id: "<app-specific weakness ID>"
@@ -215,6 +217,7 @@ _evaluator:
         name: "<weakness name from taxonomy>"
     application_specific:
       - id: "<app-specific weakness ID>"
+        name: "<exact weakness title from registry>"
         hypothesis: "Why this weakness may be needed"
 
   success_check:
@@ -237,6 +240,18 @@ _evaluator:
     agents_involved: 2
     requires_privilege_escalation: false
 ```
+
+### Human-readable identifiers (required)
+
+All IDs in generated scenarios and scenario manifests must be accompanied by their **exact human-readable names**, sourced from the active taxonomy, the application's weakness registry, or documented entry-channel definitions. Never guess an acronym expansion.
+
+- Retain existing machine-readable IDs and field types for compatibility; add companion `name` fields rather than rewriting IDs into prose.
+- For the attack surface, set `attacker.entry_point.channel` to its existing channel ID and add `channel_name`. For example, `channel: "C2"` with `channel_name: "<documented C2 label>"`. If C2 is not defined in the source materials, describe the concrete channel in `channel_name` (for example, "Uploaded assessment report") and mark that it is descriptive rather than the official C2 expansion; flag the missing definition for review.
+- Every weakness object under `_evaluator.weakness_classification` and `_evaluator.weakness_mapping.application_specific` must have `id` and `name` exactly matching `app/weakness_registry.py`'s `title`.
+- Wherever IDs occur in a string array that the runner expects (such as `flags_on` or `mandatory_weaknesses`), preserve the original string IDs. Add a separate metadata mapping with ID and name for readability, or name them in the adjacent description; do not change the loader-facing arrays into objects.
+- Impact and threat objects already use `id` and `name`; continue to require both. Scenario IDs should be accompanied by a human-readable scenario title. In index files, excluded threat IDs must also have names.
+- Preserve evaluator-only boundaries: do not move weakness identifiers into attacker-visible fields.
+- Run YAML parsing and existing scenario-loader tests after regeneration; do not change objective, attack mechanics, flags, approval status, or execution authorization merely to add names.
 
 ## Important rules
 
