@@ -4,6 +4,7 @@
 # Status: draft — requires human approval before execution
 
 id: "S2-I3-005"
+name: "Misinformation via cross-report findings exposure"
 status: "draft"
 
 impact:
@@ -36,6 +37,7 @@ attacker:
     - "Read findings and history via GET /api/findings"
   entry_point:
     channel: "C2"
+    channel_name: "Uploaded assessment report (descriptive; official C2 expansion not confirmed)"
     method: "POST /api/reports/upload"
     controlled_surface: "Content of uploaded assessment reports"
 
@@ -102,6 +104,7 @@ _evaluator:
   weakness_classification:
     mandatory:
       - id: "TA1-04"
+        name: "Cross-report findings exposed"
         reason: >
           Without TA1-04, get_findings returns only findings from the
           task's report context. Cross-report findings are filtered out
@@ -114,6 +117,7 @@ _evaluator:
         name: "Weak Isolation"
     application_specific:
       - id: "TA1-04"
+        name: "Cross-report findings exposed"
         hypothesis: "get_findings returns all findings across all reports when TA1-04 is ON"
 
   success_check:
