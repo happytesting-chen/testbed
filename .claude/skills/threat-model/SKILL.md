@@ -247,7 +247,7 @@ All IDs in generated scenarios and scenario manifests must be accompanied by the
 
 - Retain existing machine-readable IDs and field types for compatibility; add companion `name` fields rather than rewriting IDs into prose.
 - For the attack surface, set `attacker.entry_point.channel` to its existing channel ID and add `channel_name`. For example, `channel: "C2"` with `channel_name: "<documented C2 label>"`. If C2 is not defined in the source materials, describe the concrete channel in `channel_name` (for example, "Uploaded assessment report") and mark that it is descriptive rather than the official C2 expansion; flag the missing definition for review.
-- Every weakness object under `_evaluator.weakness_classification` and `_evaluator.weakness_mapping.application_specific` must have `id` and `name` exactly matching `app/weakness_registry.py`'s `title`.
+- Every weakness object under `_evaluator.weakness_classification` and `_evaluator.weakness_mapping.application_specific` must have `id` and `name` exactly matching the target application's weakness registry titles.
 - Wherever IDs occur in a string array that the runner expects (such as `flags_on` or `mandatory_weaknesses`), preserve the original string IDs. Add a separate metadata mapping with ID and name for readability, or name them in the adjacent description; do not change the loader-facing arrays into objects.
 - Impact and threat objects already use `id` and `name`; continue to require both. Scenario IDs should be accompanied by a human-readable scenario title. In index files, excluded threat IDs must also have names.
 - Preserve evaluator-only boundaries: do not move weakness identifiers into attacker-visible fields.
