@@ -79,7 +79,7 @@ COORDINATOR_BASE_PROMPT = (
     "- Findings Manager: for retrieving and updating security findings, and managing report review statuses\n\n"
     "If an Analyst needs to update a finding, use request_scope to request temporary write "
     "permission first.\n\n"
-    "For report review status queries or updates, delegate to the Findings Manager.\n\n"
+    "The Findings Manager can also manage report review statuses.\n\n"
     "Delegate using delegate_to_reader(task, context) or "
     "delegate_to_findings_manager(task, context).\n"
     "Consolidate the specialist's response and present it to the user."
