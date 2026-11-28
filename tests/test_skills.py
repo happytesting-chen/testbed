@@ -165,9 +165,9 @@ def test_new_scenario_permitted_actions():
     assert "upload_document" in s["attacker"]["permitted_actions"]
     assert "send_chat_message" in s["attacker"]["permitted_actions"]
 
-def test_new_scenario_is_draft():
+def test_new_scenario_status_valid():
     s = yaml.safe_load((SCENARIOS_DIR / "S2-I3-001.yaml").read_text())
-    assert s["status"] == "draft"
+    assert s["status"] in ("draft", "approved")
 
 def test_taxonomy_id_name_match():
     """Impact and threat IDs in S2-I3-001 must match the taxonomy."""

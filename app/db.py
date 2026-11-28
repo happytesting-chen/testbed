@@ -80,6 +80,13 @@ class Database:
                 c.execute("ALTER TABLE findings ADD COLUMN updated_by TEXT")
             if "finding_id" not in cols:
                 c.execute("ALTER TABLE findings ADD COLUMN finding_id TEXT")
+            report_cols = {r[1] for r in c.execute("PRAGMA table_info(reports)")}
+            if "review_status" not in report_cols:
+                c.execute("ALTER TABLE reports ADD COLUMN review_status TEXT DEFAULT 'Pending Review'")
+                c.execute("ALTER TABLE reports ADD COLUMN review_comment TEXT")
+                c.execute("ALTER TABLE reports ADD COLUMN reviewed_by TEXT")
+                c.execute("ALTER TABLE reports ADD COLUMN reviewed_at TEXT")
+                c.execute("UPDATE reports SET review_status='Pending Review' WHERE review_status IS NULL")
             if not c.execute("SELECT 1 FROM settings WHERE key='agent_config'").fetchone():
                 c.execute("INSERT INTO settings VALUES('agent_config', ?)", (json.dumps(DEFAULT_AGENT_CONFIG),))
 
@@ -99,8 +106,10 @@ class Database:
 
     # ---- reports ---------------------------------------------------------
     def _insert_report(self, c, rid, filename, owner, owner_role, content):
-        c.execute("INSERT INTO reports VALUES(?,?,?,?,?,?,?)",
-                  (rid, filename, owner, owner_role, "Indexed", content, now()))
+        c.execute(
+            "INSERT INTO reports(id, filename, owner, owner_role, status, content, created_at, review_status) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (rid, filename, owner, owner_role, "Indexed", content, now(), "Pending Review"))
         c.execute("INSERT INTO reports_fts(report_id, filename, content) VALUES(?,?,?)",
                   (rid, filename, content))
 
@@ -111,19 +120,39 @@ class Database:
             self._insert_report(c, rid, filename, owner, owner_role, content)
         return {"id": rid, "filename": filename, "status": "Indexed"}
 
-    def list_reports(self, owner: str | None = None) -> list[dict]:
-        q = "SELECT id, filename, owner, status, created_at FROM reports"
-        args: tuple = ()
+    def list_reports(self, owner: str | None = None, review_status: str | None = None) -> list[dict]:
+        q = "SELECT id, filename, owner, status, created_at, review_status, review_comment, reviewed_by, reviewed_at FROM reports"
+        clauses, args = [], []
         if owner:
-            q += " WHERE owner=?"
-            args = (owner,)
+            clauses.append("owner=?")
+            args.append(owner)
+        if review_status:
+            clauses.append("review_status=?")
+            args.append(review_status)
+        if clauses:
+            q += " WHERE " + " AND ".join(clauses)
         with self.conn() as c:
-            return [dict(r) for r in c.execute(q + " ORDER BY created_at", args)]
+            return [dict(r) for r in c.execute(q + " ORDER BY created_at", tuple(args))]
 
     def get_report(self, rid: str) -> dict | None:
         with self.conn() as c:
             r = c.execute("SELECT * FROM reports WHERE id=?", (rid,)).fetchone()
             return dict(r) if r else None
+
+    VALID_REVIEW_STATUSES = {"Pending Review", "Reviewed", "Requires Follow-up"}
+
+    def update_report_review(self, rid: str, review_status: str,
+                              reviewed_by: str, comment: str | None = None) -> dict | None:
+        if review_status not in self.VALID_REVIEW_STATUSES:
+            return None
+        with self.conn() as c:
+            r = c.execute("SELECT id FROM reports WHERE id=?", (rid,)).fetchone()
+            if not r:
+                return None
+            c.execute(
+                "UPDATE reports SET review_status=?, review_comment=?, reviewed_by=?, reviewed_at=? WHERE id=?",
+                (review_status, comment, reviewed_by, now(), rid))
+            return dict(c.execute("SELECT * FROM reports WHERE id=?", (rid,)).fetchone())
 
     def search_reports(self, query: str, limit: int = 3) -> list[dict]:
         terms = re.findall(r"[A-Za-z0-9]{2,}", query)[:12]

@@ -242,14 +242,21 @@ async function loadReportsAndFindings(){
     const date=new Date(r.created_at).toLocaleString("en-SG",{timeZone:"Asia/Singapore",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false});
     const isEditing=editingReportId===r.id;
     const editBtn=(role==="manager"&&count>0&&!isEditing)
-      ?`<button class="small-btn" onclick="event.stopPropagation();startEdit('${esc(r.id)}')">Edit</button>`
+      ?`<button class="small-btn" onclick="event.stopPropagation();startEdit('${esc(r.id)}')">Edit Findings</button>`
+      :'';
+    const rvStatus=r.review_status||'Pending Review';
+    const rvColor=rvStatus==='Reviewed'?'var(--ok)':rvStatus==='Requires Follow-up'?'var(--high)':'var(--muted)';
+    const reviewBtn=role==="manager"
+      ?`<button class="small-btn" onclick="event.stopPropagation();showReviewDialog('${esc(r.id)}','${esc(rvStatus)}','${esc(r.review_comment||"")}')">Review</button>`
       :'';
     html+=`<div class="report-header" onclick="toggleReport('${esc(r.id)}')">
       <span class="report-chevron${isEditing?' open':''}" id="chev-${esc(r.id)}">&#9654;</span>
       <span class="report-name">${esc(r.filename)}</span>
       <span class="report-count">${count} finding${count!==1?'s':''}</span>
+      <span style="font-size:.72rem;color:${rvColor};border:1px solid ${rvColor};border-radius:10px;padding:.1rem .4rem">${esc(rvStatus)}</span>
       <span class="report-date">${esc(date)}</span>
       ${editBtn}
+      ${reviewBtn}
       <button class="small-btn" onclick="event.stopPropagation();viewOriginalReport('${esc(r.id)}')">View Original</button>
     </div>`;
 
@@ -497,6 +504,40 @@ async function sendMessage(text){
 $("send").onclick=()=>sendMessage();
 $("q").onkeydown=e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage()}};
 $("newchat").onclick=()=>{session=null;$("log").innerHTML=""};
+
+// ── review dialog ────────────────────────────────────────────────────────────
+function showReviewDialog(rid,currentStatus,currentComment){
+  const statuses=["Pending Review","Reviewed","Requires Follow-up"];
+  let html=`<div style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;display:flex;align-items:center;justify-content:center" id="rv-overlay" onclick="if(event.target===this)this.remove()">
+    <div style="background:var(--panel);border-radius:8px;padding:1.25rem;width:380px;max-width:90vw">
+      <div style="font-weight:650;margin-bottom:.75rem">Update Review Status</div>
+      <label style="font-size:.85rem;color:var(--muted)">Status</label>
+      <select id="rv-status" style="width:100%;padding:.4rem;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit;margin-bottom:.5rem">
+        ${statuses.map(s=>`<option value="${s}"${s===currentStatus?' selected':''}>${s}</option>`).join('')}
+      </select>
+      <label style="font-size:.85rem;color:var(--muted)">Comment (optional)</label>
+      <input id="rv-comment" type="text" value="${esc(currentComment)}" placeholder="Add a review comment..." style="margin-bottom:.75rem">
+      <div style="display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="act-outline" onclick="document.getElementById('rv-overlay').remove()">Cancel</button>
+        <button class="act" onclick="submitReview('${esc(rid)}')">Save</button>
+      </div>
+      <p id="rv-err" class="err" style="margin:.4rem 0 0;font-size:.85rem"></p>
+    </div>
+  </div>`;
+  document.body.insertAdjacentHTML("beforeend",html);
+}
+
+async function submitReview(rid){
+  const status=$("rv-status").value;
+  const comment=$("rv-comment").value.trim()||null;
+  try{
+    await api("/api/reports/"+rid+"/review",{method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({review_status:status,comment:comment})});
+    document.getElementById("rv-overlay").remove();
+    loadReportsAndFindings();
+  }catch(e){$("rv-err").textContent=e.message}
+}
 </script>
 </body>
 </html>

@@ -147,7 +147,21 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
         r = db.get_report(report_id)
         if not r:
             raise HTTPException(404, "Report not found")
-        return {k: r[k] for k in ("id", "filename", "owner", "status", "created_at", "content")}
+        return {k: r[k] for k in ("id", "filename", "owner", "status", "created_at", "content",
+                                    "review_status", "review_comment", "reviewed_by", "reviewed_at")
+                if k in r}
+
+    @app.put("/api/reports/{report_id}/review")
+    def update_review(report_id: str, body: dict,
+                      ident: Identity = Depends(roles("manager"))):
+        status = body.get("review_status", "").strip()
+        comment = body.get("comment")
+        if not status:
+            raise HTTPException(400, "review_status is required")
+        updated = db.update_report_review(report_id, status, ident.user, comment)
+        if not updated:
+            raise HTTPException(404, "Report not found or invalid status")
+        return updated
 
     @app.post("/api/reports/upload")
     async def upload(file: UploadFile = File(...), ident: Identity = Depends(roles("analyst", "manager"))):
