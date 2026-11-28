@@ -126,6 +126,10 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
     def home():
         return FileResponse(STATIC / "index.html")
 
+    @app.get("/api/dev/tokens")
+    def dev_tokens():
+        return {"analyst": settings.analyst_token, "manager": settings.manager_token}
+
     @app.get("/api/health")
     def health():
         return {"status": "ok", "agent_ready": coordinator is not None}

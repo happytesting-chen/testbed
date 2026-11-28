@@ -98,10 +98,18 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:.75r
 </header>
 <main>
   <div class="panel" id="signin">
-    <label for="tok">Access token</label>
-    <div style="display:flex;gap:.5rem;margin-top:.35rem">
-      <input id="tok" type="password" autocomplete="off" style="flex:1">
+    <div style="display:flex;gap:.5rem;align-items:end;margin-bottom:.5rem">
+      <div style="flex:1">
+        <label for="tok" style="font-size:.85rem">Access token</label>
+        <input id="tok" type="password" autocomplete="off">
+      </div>
       <button class="act" id="go">Sign in</button>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center">
+      <span style="font-size:.8rem;color:var(--muted)">Quick switch:</span>
+      <button class="act-outline" id="sw-analyst" style="font-size:.8rem">Analyst</button>
+      <button class="act-outline" id="sw-manager" style="font-size:.8rem">Manager</button>
+      <button class="act-outline" id="sw-logout" style="font-size:.8rem;display:none">Logout</button>
     </div>
     <p id="sierr" class="err"></p>
   </div>
@@ -175,16 +183,35 @@ async function api(path,opt={}){
   return b;
 }
 
-$("go").onclick=async()=>{
-  token=$("tok").value.trim();
+let devTokens=null;
+async function loadDevTokens(){
+  try{devTokens=await(await fetch("/api/dev/tokens")).json()}catch(e){devTokens=null}
+}
+loadDevTokens();
+
+async function signIn(t){
+  token=t||$("tok").value.trim();
+  $("tok").value=token;
   try{
     const me=await api("/api/me");
-    role=me.role;
+    role=me.role;session=null;
     $("who").textContent=me.user+" ("+me.role+")";
     $("signin").hidden=true;
     $("workspace").classList.add("on");
+    $("sw-logout").style.display="inline-block";
     loadReportsAndFindings();
   }catch(e){$("sierr").textContent="Sign-in failed: "+e.message}
+}
+$("go").onclick=()=>signIn();
+$("sw-analyst").onclick=()=>{if(devTokens)signIn(devTokens.analyst)};
+$("sw-manager").onclick=()=>{if(devTokens)signIn(devTokens.manager)};
+$("sw-logout").onclick=()=>{
+  token="";role="";session=null;
+  $("who").textContent="Not signed in";
+  $("signin").hidden=false;
+  $("workspace").classList.remove("on");
+  $("sw-logout").style.display="none";
+  $("sierr").textContent="";
 };
 
 // ── hierarchical reports + findings ──────────────────────────────────────────
