@@ -103,14 +103,7 @@ class BedrockProvider:
         config = Config(read_timeout=int(timeout_s), connect_timeout=10,
                         retries={"max_attempts": 2, "mode": "adaptive"})
 
-        if bearer_token:
-            from botocore.credentials import Credentials
-            creds = Credentials(access_key="", secret_key="", token=bearer_token)
-            session = boto3.Session(botocore_session=boto3.session.botocore.session.get_session())
-            session._session.set_credentials(creds.access_key, creds.secret_key, creds.token)
-            self._client = session.client("bedrock-runtime", region_name=region, config=config)
-        else:
-            self._client = boto3.client("bedrock-runtime", region_name=region, config=config)
+        self._client = boto3.client("bedrock-runtime", region_name=region, config=config)
 
     @staticmethod
     def _convert_tools(tools: list[dict]) -> list[dict]:
