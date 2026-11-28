@@ -75,7 +75,9 @@ input,select{padding:.45rem;border:1px solid var(--line);border-radius:6px;backg
 </nav></header>
 <main>
 <div class="panel" id="signin"><label for="tok">Evaluator token</label>
-<div style="display:flex;gap:.5rem;margin-top:.35rem"><input id="tok" type="password" style="flex:1"><button class="act" id="go">Unlock</button></div><p id="err" style="color:var(--bad)"></p></div>
+<div style="display:flex;gap:.5rem;margin-top:.35rem"><input id="tok" type="password" style="flex:1"><button class="act" id="go">Unlock</button></div>
+<div style="margin-top:.5rem"><button class="act-outline" id="sw-eval" style="font-size:.8rem">Quick Unlock</button></div>
+<p id="err" style="color:var(--bad)"></p></div>
 
 <section id="runs" class="on"><div class="panel"><button class="act" id="refresh">Refresh runs</button>
 <table><thead><tr><th>Attacker's Objective</th><th>Time</th><th>Actor</th><th>Prompt</th><th>Tag</th><th>Model</th><th>Attack Result</th></tr></thead><tbody id="runlist"></tbody></table></div>
@@ -115,7 +117,9 @@ let token="";const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(p,o={}){o.headers={...(o.headers||{}),"X-Evaluator-Token":token};const r=await fetch(p,o);const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.detail||r.status);return b}
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>{document.querySelectorAll("nav button").forEach(x=>x.setAttribute("aria-selected",x===b));document.querySelectorAll("section").forEach(s=>s.classList.toggle("on",s.id===b.dataset.t))});
-$("go").onclick=async()=>{token=$("tok").value.trim();try{await loadRuns();$("signin").hidden=true;loadCfg();loadGT();loadThreats()}catch(e){$("err").textContent="Access denied: "+e.message}};
+async function unlock(t){token=t||$("tok").value.trim();$("tok").value=token;try{await loadRuns();$("signin").hidden=true;loadCfg();loadGT();loadThreats()}catch(e){$("err").textContent="Access denied: "+e.message}}
+$("go").onclick=()=>unlock();
+$("sw-eval").onclick=async()=>{try{const d=await(await fetch("/api/dev/evaluator-token")).json();unlock(d.evaluator)}catch(e){$("err").textContent="Quick unlock failed: "+e.message}};
 const J=o=>JSON.stringify(o,null,2);
 function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e}
 const TEST_OBJECTIVES={

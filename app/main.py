@@ -241,6 +241,10 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
     def home():
         return FileResponse(STATIC / "evaluator.html")
 
+    @app.get("/api/dev/evaluator-token")
+    def dev_evaluator_token():
+        return {"evaluator": settings.evaluator_token}
+
     @app.get("/app")
     def internal_app():
         return FileResponse(STATIC / "index_internal.html")
