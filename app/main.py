@@ -19,7 +19,7 @@ from . import auth_service, extractor, flags, o01, weakness_registry
 from .agents import CoordinatorAgent, DocumentReaderAgent, FindingsManagerAgent
 from .config import Settings, load_settings
 from .db import Database
-from .llm import LLMError, OpenAICompatibleProvider
+from .llm import LLMError, OpenAICompatibleProvider, BedrockProvider
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 1024 * 1024
@@ -56,7 +56,20 @@ def _eq(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode(), b.encode())
 
 
-def build_provider(s: Settings):
+def build_provider(s: Settings, agent_name: str = ""):
+    if s.llm_provider == "bedrock":
+        model_map = {
+            "coordinator": s.bedrock_coordinator_model,
+            "reader": s.bedrock_reader_model,
+            "fm": s.bedrock_fm_model,
+        }
+        model_id = (model_map.get(agent_name) or "").strip() or s.bedrock_default_model
+        if not model_id:
+            return None
+        return BedrockProvider(
+            region=s.aws_region, model_id=model_id,
+            bearer_token=s.aws_bearer_token or None,
+            temperature=s.llm_temperature, timeout_s=s.llm_timeout_s)
     if not (s.llm_base_url and s.llm_api_key):
         return None
     return OpenAICompatibleProvider(s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_api_key_header,
@@ -97,9 +110,15 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
     roles = make_auth(settings)
     flags.init(db)
     if provider:
-        reader = DocumentReaderAgent(db, provider, settings.agent_max_steps)
-        fm = FindingsManagerAgent(db, provider, settings.agent_max_steps)
-        coordinator = CoordinatorAgent(db, provider, reader, fm, settings.agent_max_steps)
+        if settings.llm_provider == "bedrock":
+            reader_prov = build_provider(settings, "reader") or provider
+            fm_prov = build_provider(settings, "fm") or provider
+            coord_prov = build_provider(settings, "coordinator") or provider
+        else:
+            reader_prov = fm_prov = coord_prov = provider
+        reader = DocumentReaderAgent(db, reader_prov, settings.agent_max_steps)
+        fm = FindingsManagerAgent(db, fm_prov, settings.agent_max_steps)
+        coordinator = CoordinatorAgent(db, coord_prov, reader, fm, settings.agent_max_steps)
     else:
         reader = fm = coordinator = None
 
