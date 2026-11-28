@@ -175,6 +175,7 @@ def env(tmp_path, monkeypatch):
     for k, v in TOKENS.items():
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("TESTBED_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
     from app.config import load_settings
     from app.db import Database
     s = load_settings()

@@ -110,7 +110,7 @@ def create_public_app(settings: Settings, db: Database, provider) -> FastAPI:
     roles = make_auth(settings)
     flags.init(db)
     if provider:
-        if settings.llm_provider == "bedrock":
+        if isinstance(provider, BedrockProvider):
             reader_prov = build_provider(settings, "reader") or provider
             fm_prov = build_provider(settings, "fm") or provider
             coord_prov = build_provider(settings, "coordinator") or provider
