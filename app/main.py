@@ -332,9 +332,9 @@ def create_evaluator_app(settings: Settings, db: Database, provider) -> FastAPI:
             raise HTTPException(400, str(exc))
 
     @app.post("/api/reset", dependencies=guard)
-    def reset():
-        db.reset()
-        return {"status": "reset"}
+    def reset(full: bool = False):
+        db.reset(keep_history=not full)
+        return {"status": "reset", "kept_history": not full}
 
     @app.get("/api/validations", dependencies=guard)
     def validations():
