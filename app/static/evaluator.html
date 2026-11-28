@@ -209,7 +209,8 @@ async function loadRuns(){
     const spotlight=r.agent_config&&r.agent_config.spotlight_untrusted;
     const spotBadge=spotlight?'<span style="margin-left:.3rem;padding:.1rem .35rem;border-radius:3px;font-size:.75rem;background:#fff8e1;border:1px solid #f9a825;color:#6d4c00">spotlight</span>':'';
     const tagDisplay=(tag||'<span style="color:var(--muted);font-style:italic">manual</span>')+spotBadge;
-    [r.created_at.slice(0,19).replace("T"," "),r.actor,r.prompt.slice(0,80),tagDisplay,r.model].forEach((t,i)=>{
+    const sgTime=new Date(r.created_at+"Z").toLocaleString("en-SG",{timeZone:"Asia/Singapore",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
+    [sgTime,r.actor,r.prompt.slice(0,80),tagDisplay,r.model].forEach((t,i)=>{
       const td=el("td");
       if(i===2){const a=el("a",t);a.href="#";a.onclick=e=>{e.preventDefault();showTrace(r.id)};td.append(a)}
       else if(i===3){td.innerHTML=t;}
