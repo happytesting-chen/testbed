@@ -80,7 +80,7 @@ input,select{padding:.45rem;border:1px solid var(--line);border-radius:6px;backg
 <p id="err" style="color:var(--bad)"></p></div>
 
 <section id="runs" class="on"><div class="panel"><button class="act" id="refresh">Refresh runs</button>
-<table><thead><tr><th>Attacker's Objective</th><th>Time</th><th>Actor</th><th>Prompt</th><th>Tag</th><th>Model</th><th>Attack Result</th></tr></thead><tbody id="runlist"></tbody></table></div>
+<table><thead><tr><th>Time</th><th>Actor</th><th>Prompt</th><th>Tag</th><th>Model</th><th>Attack Result</th></tr></thead><tbody id="runlist"></tbody></table></div>
 <div class="panel" id="trace" hidden></div>
 <p style="color:var(--muted);font-size:.85rem">The trace shows observable model requests, responses and tool executions. It does not show the model's internal reasoning.</p></section>
 
@@ -209,11 +209,10 @@ async function loadRuns(){
     const spotlight=r.agent_config&&r.agent_config.spotlight_untrusted;
     const spotBadge=spotlight?'<span style="margin-left:.3rem;padding:.1rem .35rem;border-radius:3px;font-size:.75rem;background:#fff8e1;border:1px solid #f9a825;color:#6d4c00">spotlight</span>':'';
     const tagDisplay=(tag||'<span style="color:var(--muted);font-style:italic">manual</span>')+spotBadge;
-    const objective=isBaseline?'<span style="color:var(--muted);font-style:italic">—</span>':objectiveFromTag(tag,r.prompt||'');
-    [objective,r.created_at.slice(0,19).replace("T"," "),r.actor,r.prompt.slice(0,80),tagDisplay,r.model].forEach((t,i)=>{
+    [r.created_at.slice(0,19).replace("T"," "),r.actor,r.prompt.slice(0,80),tagDisplay,r.model].forEach((t,i)=>{
       const td=el("td");
-      if(i===3){const a=el("a",t);a.href="#";a.onclick=e=>{e.preventDefault();showTrace(r.id)};td.append(a)}
-      else if(i===0||i===4){td.innerHTML=t;}
+      if(i===2){const a=el("a",t);a.href="#";a.onclick=e=>{e.preventDefault();showTrace(r.id)};td.append(a)}
+      else if(i===3){td.innerHTML=t;}
       else td.textContent=t;
       tr.append(td);
     });
@@ -238,10 +237,10 @@ async function loadRuns(){
       } else {
         res.innerHTML=test03succeeded?'<span class="yes">🔴 Succeeded</span>':'<span class="no">🟢 Blocked</span>';
       }
-    } else if(isManual&&severity){
+    } else if(severity){
       res.innerHTML=severity.toLowerCase()===EXPECTED.toLowerCase()?'<span class="no">🟢 Blocked</span>':'<span class="yes">🔴 Succeeded</span>';
-    } else if(isManual){
-      res.innerHTML='<span style="color:var(--muted)">— Manual</span>';
+    } else if(!severity&&isManual){
+      res.innerHTML='<span style="color:var(--muted)">— No finding detected</span>';
     } else if(attacked){
       res.innerHTML='<span class="yes">🔴 Succeeded</span>';
     } else{
